@@ -1,56 +1,73 @@
-# ENGLISH
+# 🎨 2D Texture Rigger for Maya
 
-# 2D Texture Rigger for Maya
+## 🛠 Installation
 
-## Installation
+1. Drag and drop the `install.mel` file into your Maya viewport.
+2. A **"TexRig"** button will be created on your current shelf. Click it to open the tool.
 
-1.  Drag and drop the `install.mel` file into your Maya viewport.
-2.  A "TexRig" button will be created on your current shelf. Click it to open the tool.
+---
 
-## Usage
+## 🚀 Usage
 
-1.  **Select Mesh & Position Locator:**
-    *   With the tool open, select your 3D mesh.
-    *   Click 
-    *   Move the created locator to your desired texture position on the mesh.
-2.  **Create Control System:**
-    *   Click the button in Step 2 to generate the surface-following control system.
-3.  **Connect Texture:**
-    *   In Step 3, select your image file.
-    *   If your texture has an alpha channel, it will be automatically set up for transparency.
-    *   Click "Connect" to apply the texture.
-4.  **Multiple Textures:**
-    *   You can run the tool again on the same mesh. Just provide a new "Object Prefix" in the tool's UI to create a separate texture rig without conflicts.
+### 1. Select Mesh & Position Locator
+* With the tool open, select your 3D mesh.
+* Click to create a locator.
+* Move the created locator to your desired texture position on the mesh.
 
-## Bugs and Issues
+### 2. Create Control System
+* Click the button in Step 2 to generate the surface-following control system.
 
-For any bugs or issues, please contact: civilihasan.64@gmail.com
+### 3. Connect Texture
+* In Step 3, select your image file.
+* If your texture has an alpha channel, it will be automatically set up for transparency.
+* Click **"Connect"** to apply the texture.
+
+### 4. Multiple Textures
+* You can run the tool again on the same mesh. Just provide a new **"Object Prefix"** in the tool's UI to create a separate texture rig without conflicts.
+
+---
+
+## 🐞 Bugs and Issues
+
+For any bugs or issues, please contact: 
+📩 [civilihasan.64@gmail.com](mailto:civilihasan.64@gmail.com)
+
+<br>
 
 # ////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
-# TÜRKÇE
+<br>
 
-# Maya için 2D Doku Rigleyici
+# 🎨 Maya için 2D Doku Rigleyici
 
-## Kurulum
+## 🛠 Kurulum
 
-1.  `install.mel` dosyasını Maya görüntüleme alanınıza sürükleyip bırakın.
-2.  Mevcut rafınızda "TexRig" isimli bir buton oluşacaktır. Aracı açmak için bu butona tıklayın.
+1. `install.mel` dosyasını Maya görüntüleme alanınıza (viewport) sürükleyip bırakın.
+2. Mevcut rafınızda (shelf) **"TexRig"** isimli bir buton oluşacaktır. Aracı açmak için bu butona tıklayın.
 
-## Kullanım
+---
 
-1.  **Mesh Seçimi ve Locator Konumlandırma:**
-    *   Araç açıkken, 3B meshinizi seçin.
-    *   Oluşturulan locator'ı mesh üzerinde dokunun olmasını istediğiniz konuma taşıyın.
-2.  **Kontrol Sistemi Oluşturma:**
-    *   Yüzeyi takip eden kontrol sistemini oluşturmak için Adım 2'deki butona tıklayın.
-3.  **Dokuyu Bağlama:**
-    *   Adım 3'te resim dosyanızı seçin.
-    *   Eğer dokunuz alfa kanalına sahipse, şeffaflık için otomatik olarak ayarlanacaktır.
-    *   Dokuyu uygulamak için "Bağla" butonuna tıklayın.
-4.  **Birden Fazla Doku:**
-    *   Aracı aynı mesh üzerinde tekrar çalıştırabilirsiniz. Çakışma olmadan ayrı bir doku rigi oluşturmak için aracın arayüzünde yeni bir "Nesne Ön Eki" girmeniz yeterlidir.
+## 🚀 Kullanım
 
-## Hatalar ve Sorunlar
+### 1. Mesh Seçimi ve Locator Konumlandırma
+* Araç açıkken, 3B meshinizi seçin.
+* Locator oluşturmak için ilgili butona tıklayın.
+* Oluşturulan locator'ı mesh üzerinde dokunun olmasını istediğiniz konuma taşıyın.
 
-Herhangi bir hata veya sorun için lütfen iletişime geçin: civilihasan.64@gmail.com
+### 2. Kontrol Sistemi Oluşturma
+* Yüzeyi takip eden kontrol sistemini oluşturmak için Adım 2'deki butona tıklayın.
+
+### 3. Dokuyu Bağlama
+* Adım 3'te resim dosyanızı seçin.
+* Eğer dokunuz alfa kanalına sahipse, şeffaflık için otomatik olarak ayarlanacaktır.
+* Dokuyu uygulamak için **"Bağla"** butonuna tıklayın.
+
+### 4. Birden Fazla Doku
+* Aracı aynı mesh üzerinde tekrar çalıştırabilirsiniz. Çakışma olmadan ayrı bir doku rigi oluşturmak için aracın arayüzünde yeni bir **"Nesne Ön Eki" (Object Prefix)** girmeniz yeterlidir.
+
+---
+
+## 🐞 Hatalar ve Sorunlar
+
+Herhangi bir hata veya sorun için lütfen iletişime geçin: 
+📩 [civilihasan.64@gmail.com](mailto:civilihasan.64@gmail.com)
