@@ -1,5 +1,6 @@
 import maya.cmds as cmds
 import importlib
+import re
 
 # Import logic files
 import step1_logic
@@ -505,11 +506,13 @@ class TextureRiggerUI:
             self._update_locator_list_widget()
             self.update_step1_status(f"Added locator '{locator}'.", success=True)
             
-            if current_prefix.endswith('_1'): next_prefix = f"{current_prefix[:-2]}_2"
-            elif current_prefix.endswith('_2'): next_prefix = f"{current_prefix[:-2]}_3"
-            elif current_prefix.endswith('_3'): next_prefix = f"{current_prefix[:-2]}_4"
-            elif current_prefix.endswith('_4'): next_prefix = f"{current_prefix[:-2]}_5"
-            else: next_prefix = f"{current_prefix}_1"
+            match = re.match(r'^(.+?)_(\d+)$', current_prefix)
+            if match:
+                base = match.group(1)
+                num = int(match.group(2))
+                next_prefix = f"{base}_{num + 1}"
+            else:
+                next_prefix = f"{current_prefix}_1"
                 
             cmds.textField(self.name_field, edit=True, text=next_prefix)
             self.name_prefix = next_prefix

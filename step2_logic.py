@@ -12,22 +12,9 @@ def get_uv_at_point(mesh_shape, world_point_mvector):
     Returns:
         tuple (float, float) or None: (u, v) UV coordinates or None if not found.
     """
-    selection_list = om.MSelectionList()
-    try:
-        selection_list.add(mesh_shape)
-    except RuntimeError:
-        cmds.warning(f"Mesh shape '{mesh_shape}' could not be selected.")
+    if not cmds.objExists(mesh_shape):
+        cmds.warning(f"Mesh shape '{mesh_shape}' not found.")
         return None
-
-    dag_path = om.MDagPath()
-    try:
-        selection_list.getDagPath(0, dag_path)
-    except RuntimeError:
-        cmds.warning(f"Could not get DAG path for mesh shape '{mesh_shape}'.")
-        return None
-
-    # World space point as MPoint
-    world_m_point = om.MPoint(world_point_mvector.x, world_point_mvector.y, world_point_mvector.z)
 
     cpos_node = None # Define here so it can be deleted in case of error
     try:
@@ -42,8 +29,7 @@ def get_uv_at_point(mesh_shape, world_point_mvector):
         
         # Mesh connection
         mesh_attr_to_connect = ""
-        if cmds.attributeQuery("worldMesh", node=mesh_shape, exists=True) and \
-           cmds.attributeQuery("worldMesh[0]", node=mesh_shape, exists=True):
+        if cmds.attributeQuery("worldMesh", node=mesh_shape, exists=True):
             mesh_attr_to_connect = f"{mesh_shape}.worldMesh[0]"
         elif cmds.attributeQuery("outMesh", node=mesh_shape, exists=True):
             mesh_attr_to_connect = f"{mesh_shape}.outMesh"
@@ -104,8 +90,7 @@ def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textur
 
     # Mesh connections
     # Connect mesh's worldMesh or outMesh attribute to follicle's inputMesh
-    if cmds.attributeQuery("worldMesh", node=mesh_shape_name, exists=True) and \
-       cmds.attributeQuery("worldMesh[0]", node=mesh_shape_name, exists=True):
+    if cmds.attributeQuery("worldMesh", node=mesh_shape_name, exists=True):
         cmds.connectAttr(f"{mesh_shape_name}.worldMesh[0]", f"{follicle_shape_name}.inputMesh")
     elif cmds.attributeQuery("outMesh", node=mesh_shape_name, exists=True):
         cmds.connectAttr(f"{mesh_shape_name}.outMesh", f"{follicle_shape_name}.inputMesh")
@@ -204,36 +189,36 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
         cmds.connectAttr(f"{slide_ctrl}.translate", f"{translate_invert_node}.input1", force=True)
         cmds.connectAttr(f"{translate_invert_node}.output", f"{invert_grp}.translate", force=True)
 
-        invert_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Invert_V")
         invert_u_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Invert_U")
-        cmds.connectAttr(f"{slide_ctrl}.translateX", f"{invert_v_node}.input1", force=True)
-        cmds.connectAttr(f"{slide_ctrl}.translateY", f"{invert_u_node}.input1", force=True)
-        cmds.setAttr(f"{invert_v_node}.input2", 1)
+        invert_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Invert_V")
+        cmds.connectAttr(f"{slide_ctrl}.translateX", f"{invert_u_node}.input1", force=True)
+        cmds.connectAttr(f"{slide_ctrl}.translateY", f"{invert_v_node}.input1", force=True)
         cmds.setAttr(f"{invert_u_node}.input2", 1)
+        cmds.setAttr(f"{invert_v_node}.input2", 1)
 
-        precision_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Precision_V")
         precision_u_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Precision_U")
-        cmds.connectAttr(f"{invert_v_node}.output", f"{precision_v_node}.input1", force=True)
+        precision_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Precision_V")
         cmds.connectAttr(f"{invert_u_node}.output", f"{precision_u_node}.input1", force=True)
-        cmds.connectAttr(f"{slide_ctrl}.Precision", f"{precision_v_node}.input2", force=True)
+        cmds.connectAttr(f"{invert_v_node}.output", f"{precision_v_node}.input1", force=True)
         cmds.connectAttr(f"{slide_ctrl}.Precision", f"{precision_u_node}.input2", force=True)
+        cmds.connectAttr(f"{slide_ctrl}.Precision", f"{precision_v_node}.input2", force=True)
 
-        pos_v_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_U_driver")  # For U
-        pos_u_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_V_driver")  # For V
-        cmds.connectAttr(f"{precision_v_node}.output", f"{pos_v_node}.input1", force=True)
+        pos_u_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_U_driver")
+        pos_v_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_V_driver")
         cmds.connectAttr(f"{precision_u_node}.output", f"{pos_u_node}.input1", force=True)
+        cmds.connectAttr(f"{precision_v_node}.output", f"{pos_v_node}.input1", force=True)
 
         # Get current UV values of the follicle shape
         param_u = cmds.getAttr(f"{follicle_shape}.parameterU")
         param_v = cmds.getAttr(f"{follicle_shape}.parameterV")
 
         # Set AddDoubleLinear input2 values (current UV positions)
-        cmds.setAttr(f"{pos_v_node}.input2", param_u)
-        cmds.setAttr(f"{pos_u_node}.input2", param_v)
+        cmds.setAttr(f"{pos_u_node}.input2", param_u)
+        cmds.setAttr(f"{pos_v_node}.input2", param_v)
 
         clamp_node = cmds.createNode("clamp", name=f"{base_name}_clamp")
-        cmds.connectAttr(f"{pos_v_node}.output", f"{clamp_node}.inputR", force=True)  # inputR for U
-        cmds.connectAttr(f"{pos_u_node}.output", f"{clamp_node}.inputG", force=True)  # inputG for V
+        cmds.connectAttr(f"{pos_u_node}.output", f"{clamp_node}.inputR", force=True)  # inputR for U
+        cmds.connectAttr(f"{pos_v_node}.output", f"{clamp_node}.inputG", force=True)  # inputG for V
         cmds.setAttr(f"{clamp_node}.minR", 0)
         cmds.setAttr(f"{clamp_node}.minG", 0)
         cmds.setAttr(f"{clamp_node}.minB", 0)
@@ -277,12 +262,12 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix):
             try:
                 curve_transform = cmds.listRelatives(curve_obj_shape, parent=True, fullPath=True)[0]
                 curve_center = cmds.objectCenter(curve_transform, gl=True)
-            except:
+            except Exception:
                 # Manual calculation if objectCenter fails
                 bb = cmds.exactWorldBoundingBox(slide_ctrl)
                 curve_center = [(bb[0]+bb[3])/2, (bb[1]+bb[4])/2, (bb[2]+bb[5])/2]
 
-            # Scale down CVs
+            # Scale up CVs for better visibility
             for cv in cv_list:
                 cv_pos = cmds.pointPosition(cv, world=True)
                 new_pos = [

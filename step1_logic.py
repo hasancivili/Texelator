@@ -70,7 +70,10 @@ def create_reference_follicle(mesh_transform, mesh_shape):
         
         # Connect mesh to follicle
         cmds.connectAttr(f"{mesh_shape}.worldMatrix[0]", f"{follicle_shape}.inputWorldMatrix")
-        cmds.connectAttr(f"{mesh_shape}.outMesh", f"{follicle_shape}.inputMesh")
+        if cmds.attributeQuery("worldMesh", node=mesh_shape, exists=True):
+            cmds.connectAttr(f"{mesh_shape}.worldMesh[0]", f"{follicle_shape}.inputMesh")
+        else:
+            cmds.connectAttr(f"{mesh_shape}.outMesh", f"{follicle_shape}.inputMesh")
         
         # Connect follicle's outputs to its transform
         cmds.connectAttr(f"{follicle_shape}.outTranslate", f"{follicle_transform}.translate")

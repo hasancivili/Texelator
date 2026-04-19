@@ -123,93 +123,9 @@ def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, foll
         cmds.warning(f"Image file '{image_file_path}' not found.")
         return None, None, None, None, None, None
     
-    # Find material on mesh - reuse the same logic from step3_logic to find materials
-    # This will return None, None, None, None, None, None if no material found
-    material = None
+    # Find or create material for the mesh
+    material = step3_logic.find_or_create_material(mesh_transform)
     
-    # Get the mesh's material - Focus on finding existing materials
-    material = None # This will store the final material to be used.
-    assigned_materials = [] # This list will store materials found on the mesh.
-
-    # Try multiple methods to find materials on the mesh to be more robust
-    if cmds.objExists(mesh_transform):
-        # Method 1: Using listSets to find shading groups directly on the transform, then get their surfaceShader connection.
-        shading_groups_from_sets = cmds.listSets(type=1, object=mesh_transform) or []
-        for sg in shading_groups_from_sets:
-            if cmds.attributeQuery('surfaceShader', node=sg, exists=True):
-                mat_conns = cmds.listConnections(f"{sg}.surfaceShader", source=True, destination=False, plugs=False)
-                if mat_conns:
-                    for mat_node in mat_conns:
-                        if cmds.ls(mat_node, materials=True) and mat_node not in assigned_materials:
-                            assigned_materials.append(mat_node)
-
-        # Method 2: If no materials found via listSets, check connections on the mesh's shape node(s).
-        if not assigned_materials:
-            shapes = cmds.listRelatives(mesh_transform, shapes=True, noIntermediate=True, fullPath=True) or []
-            for shape in shapes:
-                # SGs can be connected to shapes via instObjGroups or directly
-                sgs_from_shape = cmds.listConnections(shape, type='shadingEngine')
-                if sgs_from_shape:
-                    for sg_shape in list(set(sgs_from_shape)): # Unique SGs
-                        if cmds.attributeQuery('surfaceShader', node=sg_shape, exists=True):
-                            mat_conns = cmds.listConnections(f"{sg_shape}.surfaceShader", source=True, destination=False, plugs=False)
-                            if mat_conns:
-                                for mat_node in mat_conns:
-                                    if cmds.ls(mat_node, materials=True) and mat_node not in assigned_materials:
-                                        assigned_materials.append(mat_node)
-    
-    # If we found assigned materials, use the first one.
-    if assigned_materials:
-        print(f"Found existing material(s) on mesh '{mesh_transform}': {assigned_materials}")
-        material = assigned_materials[0]
-    else:
-        # Fallback: No existing materials found directly on the mesh.
-        print(f"No existing materials found on mesh '{mesh_transform}'. Attempting to use or create a default material.")
-        
-        lambert1_as_fallback = None
-        initial_sg_list = cmds.ls("initialShadingGroup", type="shadingEngine")
-        if initial_sg_list:
-            initial_sg = initial_sg_list[0]
-            # Check if mesh is a member of initialShadingGroup
-            members = cmds.sets(initial_sg, query=True) or []
-            is_member = False
-            if mesh_transform in members:
-                is_member = True
-            else:
-                shapes = cmds.listRelatives(mesh_transform, shapes=True, noIntermediate=True, fullPath=True) or []
-                for shape_node in shapes: # Renamed variable to avoid conflict
-                    if shape_node in members:
-                        is_member = True
-                        break
-            
-            mat_conns_initial_sg = cmds.listConnections(f"{initial_sg}.surfaceShader", source=True, destination=False)
-            if mat_conns_initial_sg and cmds.ls(mat_conns_initial_sg[0], materials=True):
-                lambert1_as_fallback = mat_conns_initial_sg[0]
-
-            if is_member and lambert1_as_fallback:
-                material = lambert1_as_fallback
-                print(f"Mesh '{mesh_transform}' is part of initialShadingGroup. Using its material: '{material}'.")
-        
-        if not material: # If not found via initialShadingGroup membership or other issues
-            print(f"Creating a new Lambert material and assigning it to '{mesh_transform}'.")
-            mesh_base_name = mesh_transform.split('|')[-1].split(':')[-1] # Clean name for new nodes
-            new_material_node = None
-            new_sg_node = None
-            try:
-                new_material_node = cmds.shadingNode('lambert', asShader=True, name=f"{mesh_base_name}_autoMat#")
-                new_sg_node = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=f"{new_material_node}SG#")
-                
-                cmds.connectAttr(f"{new_material_node}.outColor", f"{new_sg_node}.surfaceShader", force=True)
-                cmds.sets(mesh_transform, edit=True, forceElement=new_sg_node)
-                material = new_material_node
-                print(f"Successfully created and assigned material '{material}' with SG '{new_sg_node}' to '{mesh_transform}'.")
-            except RuntimeError as e:
-                print(f"Error creating/assigning new material for '{mesh_transform}': {e}")
-                if new_sg_node and cmds.objExists(new_sg_node): cmds.delete(new_sg_node)
-                if new_material_node and cmds.objExists(new_material_node): cmds.delete(new_material_node)
-                material = None
-    
-    # Ensure we have a material to work with
     if not material:
         cmds.warning(f"Failed to find, create, or assign a suitable material for mesh '{mesh_transform}'. Cannot connect texture.")
         return None, None, None, None, None, None
@@ -272,7 +188,7 @@ def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, foll
            cmds.attributeQuery(attr, node=file_node, exists=True):
             try:
                 cmds.connectAttr(f"{place2d_node}.{attr}", f"{file_node}.{attr}", force=True)
-            except:
+            except Exception:
                 print(f"Failed to connect {attr}")
     
     # Find the slide_ctrl
@@ -375,12 +291,6 @@ def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, foll
             if cmds.objExists(layered_texture_node):
                 cmds.delete(layered_texture_node)
             return None, None, None, None, None, None
-    
-    # Place UV_Ref group under the Texture_ctrl_grp if it exists
-    if tex_ref_setup and 'uv_ref' in tex_ref_setup:
-        texture_ctrl_grp_name = f"{name_prefix}_Texture_ctrl_grp"
-        if cmds.objExists(texture_ctrl_grp_name):
-            cmds.parent(tex_ref_setup['uv_ref'], texture_ctrl_grp_name)
     
     print(f"Connected texture '{os.path.basename(image_file_path)}' to material '{material}' using UV-based method")
     
