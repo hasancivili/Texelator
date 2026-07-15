@@ -1,87 +1,58 @@
 import maya.cmds as cmds
+import json
 import os
+import re
 
-def select_image_file():
-    """
-    Displays a file dialog to select an image file for texturing.
-    
-    Returns:
-        str: Selected file path or None if cancelled
-    """
-    image_file = cmds.fileDialog2(
-        fileMode=1,  # Single existing file
-        caption="Select Texture Image",
-        fileFilter="Image Files (*.jpg *.jpeg *.png *.tif *.tiff *.exr);;All Files (*.*)",
-        dialogStyle=2  # Maya style dialog
-    )
-    
-    if image_file and len(image_file) > 0:
-        return image_file[0]
-    return None
 
-def select_alpha_image_file():
-    """
-    Displays a file dialog to select an alpha image file for texturing.
-    
-    Returns:
-        str: Selected file path or None if cancelled
-    """
-    image_file = cmds.fileDialog2(
-        fileMode=1,  # Single existing file
-        caption="Select Alpha Texture Image",
-        fileFilter="Image Files (*.jpg *.jpeg *.png *.tif *.tiff *.exr);;All Files (*.*)",
-        dialogStyle=2  # Maya style dialog
-    )
-    
-    if image_file and len(image_file) > 0:
-        return image_file[0]
-    return None
+PLACE2D_ATTRIBUTES = (
+    'coverage', 'translateFrame', 'rotateFrame', 'mirrorU', 'mirrorV',
+    'stagger', 'wrapU', 'wrapV', 'repeatUV', 'offset', 'rotateUV',
+    'noiseUV', 'vertexUvOne', 'vertexUvTwo', 'vertexUvThree',
+    'vertexCameraOne', 'outUV', 'outUvFilterSize')
 
-def find_next_available_layer(layered_texture_node):
-    """
-    Finds the next available input layer on a layeredTexture node.
-    
-    Args:
-        layered_texture_node (str): The layeredTexture node name
-        
-    Returns:
-        int: The next available input index (0, 1, 2, etc.)
-    """
-    index = 0
-    while True:
-        # Check if this input layer is already connected
-        connections = cmds.listConnections(f"{layered_texture_node}.inputs[{index}].color", source=True, destination=False)
-        if not connections:
-            return index
-        index += 1
+
+def create_file_texture_network(
+        image_file_path, name_prefix, black_default=False):
+    """Create a file/place2d pair used by both projection and UV setups."""
+    file_node = cmds.shadingNode('file', asTexture=True, name=f'{name_prefix}_texture')
+    cmds.setAttr(f'{file_node}.fileTextureName', image_file_path, type='string')
+    if black_default:
+        cmds.setAttr(f'{file_node}.defaultColor', 0, 0, 0, type='double3')
+    place2d = cmds.shadingNode(
+        'place2dTexture', asUtility=True, name=f'{name_prefix}_place2d')
+    for attribute in PLACE2D_ATTRIBUTES:
+        if (cmds.attributeQuery(attribute, node=place2d, exists=True) and
+                cmds.attributeQuery(attribute, node=file_node, exists=True)):
+            try:
+                cmds.connectAttr(
+                    f'{place2d}.{attribute}', f'{file_node}.{attribute}', force=True)
+            except RuntimeError:
+                pass
+    return file_node, place2d
+
+
+def reorder_managed_layer_sources(layered_texture, ordered_sources):
+    """Reconnect the managed leading slots in explicit top-to-bottom order."""
+    if not layered_texture or not cmds.objExists(layered_texture):
+        return False
+    for index, source in enumerate(ordered_sources):
+        for channel in ('color', 'alpha'):
+            destination = f'{layered_texture}.inputs[{index}].{channel}'
+            for current in cmds.listConnections(
+                    destination, source=True, destination=False,
+                    plugs=True) or []:
+                cmds.disconnectAttr(current, destination)
+            cmds.connectAttr(source[channel], destination, force=True)
+    return True
+
 
 def get_max_layer_index(layered_texture_node):
-    """
-    Finds the highest used layer index in a layeredTexture node.
-    
-    Args:
-        layered_texture_node (str): The layeredTexture node name
-        
-    Returns:
-        int: The highest used layer index, or -1 if no layers are used
-    """
-    max_found = -1
-    
-    # Get all connected indices efficiently via listAttr
-    connected_attrs = cmds.listConnections(layered_texture_node, connections=True, plugs=True, source=True, destination=False) or []
-    
-    for i in range(0, len(connected_attrs), 2):
-        attr = connected_attrs[i]
-        # Match pattern like "layeredTexture.inputs[N].color"
-        if ".inputs[" in attr and "].color" in attr:
-            try:
-                idx = int(attr.split(".inputs[")[1].split("]")[0])
-                if idx > max_found:
-                    max_found = idx
-            except (ValueError, IndexError):
-                continue
-    
-    return max_found
+    """Return the highest instantiated layeredTexture input index."""
+    if not layered_texture_node or not cmds.objExists(layered_texture_node):
+        return -1
+    indices = cmds.getAttr(
+        f'{layered_texture_node}.inputs', multiIndices=True) or []
+    return max(indices) if indices else -1
 
 def shift_layers_down(layered_texture_node, max_index):
     """
@@ -102,7 +73,6 @@ def shift_layers_down(layered_texture_node, max_index):
             
             # Reconnect to new index (i+1)
             cmds.connectAttr(color_connections[0], f"{layered_texture_node}.inputs[{i+1}].color", force=True)
-            print(f"Moved color connection from input[{i}] to input[{i+1}]")
         
         # Handle alpha connections
         alpha_connections = cmds.listConnections(f"{layered_texture_node}.inputs[{i}].alpha", source=True, destination=False, plugs=True)
@@ -112,7 +82,6 @@ def shift_layers_down(layered_texture_node, max_index):
             
             # Reconnect to new index (i+1)
             cmds.connectAttr(alpha_connections[0], f"{layered_texture_node}.inputs[{i+1}].alpha", force=True)
-            print(f"Moved alpha connection from input[{i}] to input[{i+1}]")
 
 def find_or_create_material(mesh_transform):
     """
@@ -151,11 +120,8 @@ def find_or_create_material(mesh_transform):
                                         assigned_materials.append(mat_node)
 
     if assigned_materials:
-        print(f"Found existing material(s) on mesh '{mesh_transform}': {assigned_materials}")
         material = assigned_materials[0]
     else:
-        print(f"No existing materials found on mesh '{mesh_transform}'. Attempting to use or create a default material.")
-        
         lambert1_as_fallback = None
         initial_sg_list = cmds.ls("initialShadingGroup", type="shadingEngine")
         if initial_sg_list:
@@ -177,10 +143,8 @@ def find_or_create_material(mesh_transform):
 
             if is_member and lambert1_as_fallback:
                 material = lambert1_as_fallback
-                print(f"Mesh '{mesh_transform}' is part of initialShadingGroup. Using its material: '{material}'.")
         
         if not material:
-            print(f"Creating a new Lambert material and assigning it to '{mesh_transform}'.")
             mesh_base_name = mesh_transform.split('|')[-1].split(':')[-1]
             new_material_node = None
             new_sg_node = None
@@ -191,16 +155,134 @@ def find_or_create_material(mesh_transform):
                 cmds.connectAttr(f"{new_material_node}.outColor", f"{new_sg_node}.surfaceShader", force=True)
                 cmds.sets(mesh_transform, edit=True, forceElement=new_sg_node)
                 material = new_material_node
-                print(f"Successfully created and assigned material '{material}' with SG '{new_sg_node}' to '{mesh_transform}'.")
             except RuntimeError as e:
-                print(f"Error creating/assigning new material for '{mesh_transform}': {e}")
+                cmds.warning(f"Could not assign a material to '{mesh_transform}': {e}")
                 if new_sg_node and cmds.objExists(new_sg_node): cmds.delete(new_sg_node)
                 if new_material_node and cmds.objExists(new_material_node): cmds.delete(new_material_node)
                 material = None
 
     return material
 
-def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="textureRigger", bind_joint=None):
+
+def get_material_color_attr(material):
+    """Return the color input supported by the assigned Maya/render material."""
+    for attribute in ('baseColor', 'color', 'diffuseColor', 'diffuse_color'):
+        if cmds.attributeQuery(attribute, node=material, exists=True):
+            return f'{material}.{attribute}'
+    return None
+
+
+def connect_source_to_material_layer(material, source_color, source_alpha):
+    """Insert one texture source at input 0 of the material layeredTexture."""
+    material_color_attr = get_material_color_attr(material)
+    if not material_color_attr:
+        cmds.warning(f"Cannot find color attribute on material '{material}'.")
+        return None
+
+    existing = cmds.listConnections(
+        material_color_attr, source=True, destination=False, plugs=True) or []
+    layered_texture = None
+    if existing and cmds.objectType(existing[0].split('.')[0]) == 'layeredTexture':
+        layered_texture = existing[0].split('.')[0]
+
+    if not layered_texture:
+        material_short = material.split('|')[-1].split(':')[-1]
+        material_prefix = material_short.split('_')[0] if '_' in material_short else material_short
+        layered_texture = cmds.shadingNode(
+            'layeredTexture', asTexture=True, name=f'{material_prefix}_layeredTexture')
+        if existing:
+            cmds.disconnectAttr(existing[0], material_color_attr)
+            cmds.connectAttr(existing[0], f'{layered_texture}.inputs[1].color', force=True)
+        cmds.connectAttr(f'{layered_texture}.outColor', material_color_attr, force=True)
+    else:
+        max_index = get_max_layer_index(layered_texture)
+        if max_index >= 0:
+            shift_layers_down(layered_texture, max_index)
+
+    cmds.connectAttr(source_color, f'{layered_texture}.inputs[0].color', force=True)
+    cmds.connectAttr(source_alpha, f'{layered_texture}.inputs[0].alpha', force=True)
+    return layered_texture
+
+
+def capture_material_state(mesh_transform):
+    """Capture the material input and existing layeredTexture before Step 3."""
+    material = find_or_create_material(mesh_transform)
+    color_attr = get_material_color_attr(material) if material else None
+    if not color_attr:
+        return None
+    sources = cmds.listConnections(
+        color_attr, source=True, destination=False, plugs=True) or []
+    source = sources[0] if sources else None
+    layered = source.split('.')[0] if source and cmds.objectType(source.split('.')[0]) == 'layeredTexture' else None
+    layers = []
+    if layered:
+        for index in cmds.getAttr(f'{layered}.inputs', multiIndices=True) or []:
+            entry = {'index': index}
+            for child in ('color', 'alpha'):
+                plug = f'{layered}.inputs[{index}].{child}'
+                connections = cmds.listConnections(
+                    plug, source=True, destination=False, plugs=True) or []
+                entry[f'{child}_source'] = connections[0] if connections else None
+                if not connections:
+                    try:
+                        entry[f'{child}_value'] = cmds.getAttr(plug)
+                    except RuntimeError:
+                        entry[f'{child}_value'] = None
+            for child in ('blendMode', 'isVisible'):
+                try:
+                    entry[child] = cmds.getAttr(f'{layered}.inputs[{index}].{child}')
+                except RuntimeError:
+                    entry[child] = None
+            layers.append(entry)
+    return {
+        'material': material, 'color_attr': color_attr, 'source': source,
+        'layered_texture': layered, 'layers': layers
+    }
+
+
+def restore_material_state(state, current_layered_nodes=()):
+    """Restore the material graph captured before Step 3."""
+    if not state or not cmds.objExists(state.get('material')):
+        return
+    color_attr = state['color_attr']
+    for source in cmds.listConnections(
+            color_attr, source=True, destination=False, plugs=True) or []:
+        cmds.disconnectAttr(source, color_attr)
+
+    layered = state.get('layered_texture')
+    if layered and cmds.objExists(layered):
+        for index in cmds.getAttr(f'{layered}.inputs', multiIndices=True) or []:
+            try:
+                cmds.removeMultiInstance(f'{layered}.inputs[{index}]', b=True)
+            except RuntimeError:
+                pass
+        for entry in state.get('layers', []):
+            index = entry['index']
+            for child in ('color', 'alpha'):
+                plug = f'{layered}.inputs[{index}].{child}'
+                source = entry.get(f'{child}_source')
+                value = entry.get(f'{child}_value')
+                if source and cmds.objExists(source.split('.')[0]):
+                    cmds.connectAttr(source, plug, force=True)
+                elif value is not None:
+                    if child == 'color':
+                        rgb = value[0] if isinstance(value, (list, tuple)) and len(value) == 1 else value
+                        cmds.setAttr(plug, *rgb, type='double3')
+                    else:
+                        cmds.setAttr(plug, value)
+            for child in ('blendMode', 'isVisible'):
+                if entry.get(child) is not None:
+                    cmds.setAttr(f'{layered}.inputs[{index}].{child}', entry[child])
+
+    original_source = state.get('source')
+    if original_source and cmds.objExists(original_source.split('.')[0]):
+        cmds.connectAttr(original_source, color_attr, force=True)
+
+    for node in set(current_layered_nodes):
+        if node and node != layered and cmds.objExists(node):
+            cmds.delete(node)
+
+def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="texelator", bind_joint=None):
     """
     Connects the specified texture to the mesh's material using a projection node.
     If the material already has a texture, uses a layeredTexture node to layer them.
@@ -229,64 +311,7 @@ def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="textur
         cmds.warning(f"Failed to find, create, or assign a suitable material for mesh '{mesh_transform}'. Cannot connect texture.")
         return None, None, None, None, None, None
     
-    print(f"Using material '{material}' for texture connection")
-    
-    # Get material name for layered texture naming
-    material_name = material.split('|')[-1].split(':')[-1]
-    material_prefix = material_name.split('_')[0] if '_' in material_name else material_name
-    layered_texture_name = f"{material_prefix}_layeredTexture"
-    
-    # Check if material already has a texture connected to its baseColor or color
-    material_color_attr = None
-    if cmds.attributeQuery('baseColor', node=material, exists=True):
-        material_color_attr = f"{material}.baseColor"
-    elif cmds.attributeQuery('color', node=material, exists=True):
-        material_color_attr = f"{material}.color"
-    elif cmds.attributeQuery('diffuseColor', node=material, exists=True):
-        material_color_attr = f"{material}.diffuseColor"
-    
-    if not material_color_attr:
-        cmds.warning(f"Cannot find color attribute on material '{material}'.")
-        return None, None, None, None, None, None
-    
-    # Check if anything is connected to the color attribute
-    material_color_connections = cmds.listConnections(material_color_attr, source=True, destination=False, plugs=True)
-    
-    # Initialize variables before they are used
-    existing_connection_to_layer = False
-    layered_texture_node = None
-    
-    # Check if what's connected is a layeredTexture (from previous runs of this tool)
-    if material_color_connections:
-        connected_node = material_color_connections[0].split('.')[0]
-        if cmds.objectType(connected_node) == 'layeredTexture':
-            layered_texture_node = connected_node
-            existing_connection_to_layer = True
-            print(f"Found existing layeredTexture node '{layered_texture_node}' connected to material")
-    
-    # Create a file texture node
-    file_node = cmds.shadingNode('file', asTexture=True, name=f"{name_prefix}_texture")
-    # Set the file path
-    cmds.setAttr(f"{file_node}.fileTextureName", image_file_path, type="string")
-    
-    # Create a place2dTexture node for the file
-    place2d_node = cmds.shadingNode('place2dTexture', asUtility=True, name=f"{name_prefix}_place2d")
-    
-    # Connect place2dTexture to file node
-    place2d_attrs = [
-        "coverage", "translateFrame", "rotateFrame", "mirrorU", "mirrorV", 
-        "stagger", "wrapU", "wrapV", "repeatUV", "offset", "rotateUV", 
-        "noiseUV", "vertexUvOne", "vertexUvTwo", "vertexUvThree", 
-        "vertexCameraOne", "outUV", "outUvFilterSize"
-    ]
-    
-    for attr in place2d_attrs:
-        if cmds.attributeQuery(attr, node=place2d_node, exists=True) and \
-           cmds.attributeQuery(attr, node=file_node, exists=True):
-            try:
-                cmds.connectAttr(f"{place2d_node}.{attr}", f"{file_node}.{attr}", force=True)
-            except Exception:
-                print(f"Failed to connect {attr}")
+    file_node, place2d_node = create_file_texture_network(image_file_path, name_prefix)
     
     # Create a place3dTexture node for the projection
     place3d_node = cmds.shadingNode('place3dTexture', asUtility=True, name=f"{name_prefix}_place3d")
@@ -342,77 +367,12 @@ def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="textur
     cmds.connectAttr(f"{alpha_projection_node}.outColorR", f"{projection_node}.alphaOffset", force=True)
     # End of new alpha handling logic
     
-    # Handle connection to material based on whether there's an existing texture
-    if material_color_connections and not existing_connection_to_layer:
-        # There's an existing texture but not a layeredTexture, so create one
-        layered_texture_node = cmds.shadingNode('layeredTexture', asTexture=True, name=layered_texture_name)
-        
-        # Connect the existing texture to layer 1 (index 1)
-        existing_texture_out = material_color_connections[0]
-        
-        # Disconnect existing texture from material
-        cmds.disconnectAttr(existing_texture_out, material_color_attr)
-        
-        # Connect existing texture to layer 1 (not layer 0)
-        cmds.connectAttr(existing_texture_out, f"{layered_texture_node}.inputs[1].color", force=True)
-        
-        # Connect new projection to layer 0 (top layer)
-        cmds.connectAttr(f"{projection_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-        
-        # Connect projection's outAlpha to layer 0's alpha
-        cmds.connectAttr(f"{projection_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-        
-        # Connect layeredTexture to material
-        cmds.connectAttr(f"{layered_texture_node}.outColor", material_color_attr, force=True)
-        
-        print(f"Created layeredTexture with existing texture at layer 1 and new projection at layer 0 (top)")
-        print(f"Connected {projection_node}.outAlpha to {layered_texture_node}.inputs[0].alpha")
-        
-    elif existing_connection_to_layer:
-        # Already have a layeredTexture, shift all existing layers down and put new one at index 0
-        max_layer_index = get_max_layer_index(layered_texture_node)
-        if max_layer_index >= 0:
-            # Shift layers down
-            shift_layers_down(layered_texture_node, max_layer_index)
-            
-            # Connect new projection to top layer (index 0)
-            cmds.connectAttr(f"{projection_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-            
-            # Connect projection's outAlpha to layer 0's alpha
-            cmds.connectAttr(f"{projection_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-            
-            print(f"Shifted all layers down and connected new projection to top layer (layer 0)")
-            print(f"Connected {projection_node}.outAlpha to {layered_texture_node}.inputs[0].alpha")
-        else:
-            # If no layers found, just connect to layer 0
-            cmds.connectAttr(f"{projection_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-            
-            # Connect projection's outAlpha to layer 0's alpha
-            cmds.connectAttr(f"{projection_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-            
-            print(f"Connected new projection to layer 0 of empty layeredTexture")
-            print(f"Connected {projection_node}.outAlpha to {layered_texture_node}.inputs[0].alpha")
-        
-    else:
-        # No existing texture, create layered texture for future expansion
-        layered_texture_node = cmds.shadingNode('layeredTexture', asTexture=True, name=layered_texture_name)
-        
-        # Connect projection to layer 0
-        cmds.connectAttr(f"{projection_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-        
-        # Connect projection's outAlpha to layer 0's alpha
-        cmds.connectAttr(f"{projection_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-        
-        # Connect layeredTexture to material
-        try:
-            cmds.connectAttr(f"{layered_texture_node}.outColor", material_color_attr, force=True)
-            print(f"Created new layeredTexture with projection at layer 0")
-            print(f"Connected {projection_node}.outAlpha to {layered_texture_node}.inputs[0].alpha")
-        except Exception as e:
-            cmds.warning(f"Failed to connect layered texture to material: {e}")
-            # Clean up nodes if connection failed
-            cmds.delete(file_node, place2d_node, place3d_node, projection_node, layered_texture_node)
-            return None, None, None, None, None, None
+    layered_texture_node = connect_source_to_material_layer(
+        material, f'{projection_node}.outColor', f'{projection_node}.outAlpha')
+    if not layered_texture_node:
+        cmds.delete(file_node, place2d_node, place3d_node, projection_node,
+                    alpha_layered_texture_node, alpha_projection_node)
+        return None, None, None, None, None, None
     
     # If bind_joint is provided, set up constraints
     if bind_joint and cmds.objExists(bind_joint):
@@ -427,24 +387,19 @@ def connect_texture_to_mesh(mesh_transform, image_file_path, name_prefix="textur
             
             # Create parent constraint
             parent_constraint = cmds.parentConstraint(bind_joint, place3d_node, maintainOffset=True)[0]
-            print(f"Created parent constraint '{parent_constraint}' from '{bind_joint}' to '{place3d_node}'")
             
             # Create scale constraint
             scale_constraint = cmds.scaleConstraint(bind_joint, place3d_node, maintainOffset=True)[0]
-            print(f"Created scale constraint '{scale_constraint}' from '{bind_joint}' to '{place3d_node}'")
             
         except Exception as e:
             cmds.warning(f"Failed to constrain place3dTexture to bind joint: {e}")
     
-    print(f"Connected texture '{os.path.basename(image_file_path)}' to material '{material}' using projection")
     return file_node, projection_node, place2d_node, place3d_node, layered_texture_node, material
-
-# Removed connect_texture_with_alpha function as it's no longer needed.
 
 def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, name_prefix, master_group_name=None):
     """
     Organizes the scene hierarchy according to specified requirements:
-    1. Creates or finds a master group for the TextureRigger setup
+    1. Creates or finds a master group for the Texelator setup
     2. Places mesh under GEO group
     3. Creates RIG group with prefix_Texture_ctrl_grp for follicle
     4. Places place3dTexture under UTIL group (if provided)
@@ -467,20 +422,22 @@ def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, n
     # This will be the path of the mesh after this function.
     final_mesh_path = mesh_transform
 
-    # --- Master Group (TextureRigSystem) ---
+    # --- Per-mesh Texelator group ---
     if not master_group_name:
-        master_group_name = "TextureRigSystem"
+        mesh_short_name = mesh_transform.split('|')[-1].split(':')[-1]
+        master_group_name = f"Texelator_{mesh_short_name}"
     
     master_group_long_name = ""
     if not cmds.objExists(master_group_name):
         master_group_long_name = cmds.group(empty=True, name=master_group_name, world=True)
-        # Add identifier attribute
-        cmds.addAttr(master_group_long_name, longName="isTextureRiggerSetup", attributeType="bool", defaultValue=True)
-        cmds.setAttr(f"{master_group_long_name}.isTextureRiggerSetup", lock=True)
-        cmds.addAttr(master_group_long_name, longName="textureRiggerVersion", dataType="string")
-        cmds.setAttr(f"{master_group_long_name}.textureRiggerVersion", "0.1.0", type="string", lock=True)
     else:
         master_group_long_name = cmds.ls(master_group_name, long=True)[0]
+    if not cmds.attributeQuery("isTexelatorSetup", node=master_group_long_name, exists=True):
+        cmds.addAttr(master_group_long_name, longName="isTexelatorSetup", attributeType="bool", defaultValue=True)
+        cmds.setAttr(f"{master_group_long_name}.isTexelatorSetup", lock=True)
+    if not cmds.attributeQuery("texelatorVersion", node=master_group_long_name, exists=True):
+        cmds.addAttr(master_group_long_name, longName="texelatorVersion", dataType="string")
+        cmds.setAttr(f"{master_group_long_name}.texelatorVersion", "0.1.4", type="string", lock=True)
 
     # Mesh stays where it is (no GEO group)
     if cmds.objExists(mesh_transform):
@@ -488,7 +445,6 @@ def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, n
     else:
         cmds.warning(f"Mesh '{mesh_transform}' not found at the start of scene organization.")
     
-    # ... existing code for RIG group ...
     rig_group_name = "RIG"
     rig_group_long_name = ""
     # Look for RIG under master group
@@ -501,17 +457,14 @@ def organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, n
         rig_group_long_name = cmds.group(empty=True, name=rig_group_name, parent=master_group_long_name)
     
     texture_ctrl_grp_name = f"{name_prefix}_Texture_ctrl_grp"
-    texture_ctrl_grp_long_name = ""
-    if not cmds.objExists(texture_ctrl_grp_name):
-        texture_ctrl_grp_long_name = cmds.group(empty=True, name=texture_ctrl_grp_name, parent=rig_group_long_name)
-    else:
-        # Ensure it's parented under RIG if it exists but is not parented correctly
-        existing_grp_full_path = cmds.ls(texture_ctrl_grp_name, long=True)[0]
-        grp_parent_list = cmds.listRelatives(existing_grp_full_path, parent=True, fullPath=True)
-        grp_parent_full_path = grp_parent_list[0] if grp_parent_list else None
-        if grp_parent_full_path != rig_group_long_name:
-            cmds.parent(existing_grp_full_path, rig_group_long_name)
-        texture_ctrl_grp_long_name = cmds.ls(texture_ctrl_grp_name, long=True)[0] # Get full path
+    texture_ctrl_grp_long_name = next(
+        (child for child in cmds.listRelatives(
+            rig_group_long_name, children=True, type='transform', fullPath=True) or []
+         if child.split('|')[-1] == texture_ctrl_grp_name),
+        None)
+    if not texture_ctrl_grp_long_name:
+        texture_ctrl_grp_long_name = cmds.group(
+            empty=True, name=texture_ctrl_grp_name, parent=rig_group_long_name)
 
     if cmds.objExists(follicle_transform):
         current_follicle_parent_list = cmds.listRelatives(follicle_transform, parent=True, fullPath=True)
@@ -588,7 +541,94 @@ def find_bind_joint_from_follicle(follicle_transform):
     
     return None
 
-def setup_sequence_texture(file_node, slide_ctrl, is_sequence=False):
+def detect_image_sequence_range(image_path):
+    """Return the real frame range for the selected image sequence.
+
+    The last numeric block before the extension is treated as the frame number,
+    so both ``name.1001.exr`` and ``name_0001.png`` are supported. Files must
+    share the same text before/after that number and the same extension.
+    """
+    if not image_path:
+        return None
+    image_path = os.path.abspath(os.path.expandvars(os.path.expanduser(image_path)))
+    directory, filename = os.path.split(image_path)
+    stem, extension = os.path.splitext(filename)
+    match = re.search(r'(\d+)(?!.*\d)', stem)
+    if not match or not os.path.isdir(directory):
+        return None
+    prefix = stem[:match.start()]
+    suffix = stem[match.end():]
+    pattern = re.compile(
+        r'^{}(\d+){}{}$'.format(
+            re.escape(prefix), re.escape(suffix), re.escape(extension)),
+        re.IGNORECASE)
+    frames = []
+    try:
+        for entry in os.scandir(directory):
+            if not entry.is_file():
+                continue
+            candidate = pattern.match(entry.name)
+            if candidate:
+                frames.append(int(candidate.group(1)))
+    except OSError:
+        return None
+    if not frames:
+        return None
+    return min(frames), max(frames), len(set(frames))
+
+
+def _file_sequence_range(file_node):
+    if not file_node or not cmds.objExists(file_node):
+        return None
+    try:
+        return detect_image_sequence_range(
+            cmds.getAttr(f'{file_node}.fileTextureName'))
+    except (RuntimeError, TypeError):
+        return None
+
+
+def _connected_sequence_range(frame_attr, additional_file_node=None):
+    """Combine ranges of all file nodes driven by one controller attribute."""
+    file_nodes = []
+    try:
+        destinations = cmds.listConnections(
+            frame_attr, source=False, destination=True,
+            plugs=True, connections=False) or []
+    except RuntimeError:
+        destinations = []
+    for destination in destinations:
+        if destination.endswith('.frameExtension'):
+            node = destination.rsplit('.', 1)[0]
+            if node not in file_nodes:
+                file_nodes.append(node)
+    if additional_file_node and additional_file_node not in file_nodes:
+        file_nodes.append(additional_file_node)
+    ranges = [value for value in map(_file_sequence_range, file_nodes) if value]
+    if not ranges:
+        return 0, 9999, 0
+    return (
+        min(value[0] for value in ranges),
+        max(value[1] for value in ranges),
+        sum(value[2] for value in ranges))
+
+
+def _set_integer_attribute_range(frame_attr, minimum, maximum):
+    """Safely replace an existing numeric attribute's hard limits."""
+    current = cmds.getAttr(frame_attr)
+    # Keep the current value valid while first changing the limits, then clamp
+    # it and apply the exact detected range.
+    cmds.addAttr(
+        frame_attr, edit=True,
+        minValue=min(minimum, current), maxValue=max(maximum, current))
+    clamped = max(minimum, min(maximum, current))
+    if clamped != current:
+        cmds.setAttr(frame_attr, clamped)
+    cmds.addAttr(
+        frame_attr, edit=True, minValue=minimum, maxValue=maximum)
+
+
+def setup_sequence_texture(file_node, slide_ctrl, is_sequence=False,
+                           attribute_name="Frame"):
     """
     Sets up a texture file node for sequence playback and connects it to a slide ctrl.
     
@@ -596,6 +636,7 @@ def setup_sequence_texture(file_node, slide_ctrl, is_sequence=False):
         file_node (str): The file texture node name
         slide_ctrl (str): The slide control that will drive the frame
         is_sequence (bool): Whether to enable sequence mode
+        attribute_name (str): Controller attribute driving frameExtension
         
     Returns:
         bool: True if successful, False otherwise
@@ -608,28 +649,39 @@ def setup_sequence_texture(file_node, slide_ctrl, is_sequence=False):
         # Set useFrameExtension based on is_sequence flag
         cmds.setAttr(f"{file_node}.useFrameExtension", 1 if is_sequence else 0)
         
-        # Handle Frame attribute on slide_ctrl
-        frame_attr = f"{slide_ctrl}.Frame"
+        frame_attr = f"{slide_ctrl}.{attribute_name}"
         
         # If sequence mode is enabled, create or update the Frame attribute
         if is_sequence:
-            # Check if Frame attribute already exists
-            if not cmds.attributeQuery("Frame", node=slide_ctrl, exists=True):
-                # Create the Frame attribute if it doesn't exist
-                cmds.addAttr(slide_ctrl, longName="Frame", attributeType="long", defaultValue=1, 
-                           minValue=0, maxValue=9999, keyable=True)
-                print(f"Added Frame attribute to {slide_ctrl}")
+            attribute_exists = cmds.attributeQuery(
+                attribute_name, node=slide_ctrl, exists=True)
+            if attribute_exists:
+                minimum, maximum, _count = _connected_sequence_range(
+                    frame_attr, additional_file_node=file_node)
+            else:
+                detected = _file_sequence_range(file_node)
+                minimum, maximum, _count = detected or (0, 9999, 0)
+            if not attribute_exists:
+                cmds.addAttr(slide_ctrl, longName=attribute_name,
+                           attributeType="long", defaultValue=minimum,
+                           minValue=minimum, maxValue=maximum, keyable=True)
+            else:
+                _set_integer_attribute_range(
+                    frame_attr, minimum, maximum)
             
             # Connect Frame attribute to frameExtension
             if not cmds.isConnected(frame_attr, f"{file_node}.frameExtension"):
                 cmds.connectAttr(frame_attr, f"{file_node}.frameExtension", force=True)
-                print(f"Connected {frame_attr} to {file_node}.frameExtension")
         else:
             # Disconnect if exists and sequence mode is disabled
-            if cmds.attributeQuery("Frame", node=slide_ctrl, exists=True):
+            if cmds.attributeQuery(
+                    attribute_name, node=slide_ctrl, exists=True):
                 if cmds.isConnected(frame_attr, f"{file_node}.frameExtension"):
                     cmds.disconnectAttr(frame_attr, f"{file_node}.frameExtension")
-                    print(f"Disconnected {frame_attr} from {file_node}.frameExtension")
+                    minimum, maximum, _count = _connected_sequence_range(
+                        frame_attr)
+                    _set_integer_attribute_range(
+                        frame_attr, minimum, maximum)
                 
                 # Optionally, we could also remove the attribute
                 # cmds.deleteAttr(slide_ctrl, attribute="Frame")
@@ -667,13 +719,13 @@ def hide_slide_ctrl_attributes(slide_ctrl):
                 # Lock the attribute
                 cmds.setAttr(f"{slide_ctrl}.{attr}", lock=True)
         
-        print(f"Successfully hidden and locked specified attributes on {slide_ctrl}")
         return True
     except Exception as e:
         cmds.warning(f"Error hiding/locking attributes on {slide_ctrl}: {e}")
         return False
 
-def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="textureRigger", follicle_transform=None, is_sequence=False):
+def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="texelator",
+                    follicle_transform=None, is_sequence=False, master_group_name=None):
     """
     Main logic for Step 3: Connects texture and organizes scene.
     
@@ -684,13 +736,11 @@ def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="textureRi
         follicle_transform (str, optional): Follicle transform node name
         is_sequence (bool, optional): Whether the texture is a sequence
         
-    Returns:
-        tuple: (file_node, projection_node, place2d_node, place3d_node, layered_texture, material_node, updated_mesh_transform)
-        or (None, None, None, None, None, None, original_mesh_transform_if_failed)
+    Returns the projection nodes, material, mesh path and tracked support nodes.
     """
     if not image_file_path:
         cmds.warning("No image file path provided for texture connection.")
-        return None, None, None, None, None, None, mesh_transform
+        return None, None, None, None, None, None, mesh_transform, {}
 
     bind_joint = find_bind_joint_from_follicle(follicle_transform) if follicle_transform else None
 
@@ -705,7 +755,7 @@ def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="textureRi
 
     if not file_node: 
         cmds.warning(f"Texture connection failed for prefix '{name_prefix}'. Skipping organization.")
-        return None, None, None, None, None, None, mesh_transform
+        return None, None, None, None, None, None, mesh_transform, {}
 
     # Find slide_ctrl for the follicle
     slide_ctrl = None
@@ -734,11 +784,21 @@ def run_step3_logic(mesh_transform, image_file_path=None, name_prefix="textureRi
         hide_slide_ctrl_attributes(slide_ctrl)
 
     if follicle_transform and place3d_node: 
-        updated_mesh_path_after_organization = organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node, name_prefix)
+        updated_mesh_path_after_organization = organize_scene_hierarchy(
+            mesh_transform, follicle_transform, place3d_node, name_prefix,
+            master_group_name=master_group_name)
     else:
         cmds.warning(f"Skipping scene organization for prefix '{name_prefix}' due to missing follicle or place3dTexture node.")
             
-    return file_node, projection_node, place2d_node, place3d_node, layered_texture, material, updated_mesh_path_after_organization
+    support_nodes = []
+    for alpha_projection in cmds.listConnections(
+            f'{projection_node}.alphaOffset', source=True, destination=False) or []:
+        support_nodes.append(alpha_projection)
+        support_nodes.extend(cmds.listConnections(
+            f'{alpha_projection}.image', source=True, destination=False) or [])
+    details = {'support_nodes': list(set(support_nodes))}
+    return (file_node, projection_node, place2d_node, place3d_node,
+            layered_texture, material, updated_mesh_path_after_organization, details)
 
 
 # --- Layer Management ---
@@ -834,7 +894,6 @@ def swap_layers(layered_texture_node, index_a, index_b):
     if alpha_a:
         cmds.connectAttr(alpha_a[0], f"{layered_texture_node}.inputs[{index_b}].alpha", force=True)
     
-    print(f"Swapped layers {index_a} and {index_b} in {layered_texture_node}")
     return True
 
 
@@ -842,18 +901,39 @@ def swap_layers(layered_texture_node, index_a, index_b):
 
 def scan_existing_setups():
     """
-    Scans the scene for existing TextureRigger master groups.
+    Scans the scene for Texelator master groups, including legacy TextureRigger setups.
     
     Returns:
         list: List of dicts with 'master_group', 'mesh', 'prefixes' keys
     """
     setups = []
     
-    # Find all nodes with the isTextureRiggerSetup attribute
+    # Keep legacy scenes editable after the rebrand.
     all_transforms = cmds.ls(type="transform") or []
     for node in all_transforms:
-        if cmds.attributeQuery("isTextureRiggerSetup", node=node, exists=True):
-            setup_info = {'master_group': node, 'mesh': None, 'prefixes': []}
+        if (cmds.attributeQuery("isTexelatorSetup", node=node, exists=True) or
+                cmds.attributeQuery("isTextureRiggerSetup", node=node, exists=True)):
+            setup_info = {'master_group': node, 'mesh': None, 'prefixes': [], 'stage': 'final', 'setup_id': None}
+            if cmds.attributeQuery('texelatorStage', node=node, exists=True):
+                setup_info['stage'] = cmds.getAttr(f'{node}.texelatorStage') or 'selected_mesh'
+            if cmds.attributeQuery('texelatorSetupId', node=node, exists=True):
+                setup_info['setup_id'] = cmds.getAttr(f'{node}.texelatorSetupId')
+            if cmds.attributeQuery('texelatorMesh', node=node, exists=True):
+                stored_mesh = cmds.getAttr(f'{node}.texelatorMesh')
+                if stored_mesh and cmds.objExists(stored_mesh):
+                    setup_info['mesh'] = stored_mesh
+            if cmds.attributeQuery('texelatorData', node=node, exists=True):
+                try:
+                    setup_info['metadata'] = json.loads(
+                        cmds.getAttr(f'{node}.texelatorData') or '{}')
+                except (TypeError, ValueError):
+                    setup_info['metadata'] = {}
+            main_prefixes = set()
+            for part in setup_info.get('metadata', {}).get('parts', {}).values():
+                if part.get('original_key'):
+                    main_prefixes.add(part['original_key'])
+                if part.get('guide_key'):
+                    main_prefixes.add(part['guide_key'])
             
             node_children = cmds.listRelatives(node, children=True, type="transform", fullPath=True) or []
             
@@ -865,6 +945,8 @@ def scan_existing_setups():
                         rc_short = rc.split('|')[-1]
                         if rc_short.endswith("_Texture_ctrl_grp"):
                             prefix = rc_short.replace("_Texture_ctrl_grp", "")
+                            if main_prefixes and prefix not in main_prefixes:
+                                continue
                             setup_info['prefixes'].append(prefix)
                             
                             # Find mesh from follicle inputMesh connection
@@ -892,48 +974,17 @@ def scan_existing_setups():
                                 setup_info['mesh'] = geo_child
                                 break
                         break
+
+            # A paused guide-stage setup has locators directly under its group.
+            if setup_info['stage'] == 'guides':
+                guide_nodes = cmds.listRelatives(node, allDescendents=True, type='transform', fullPath=True) or []
+                for guide in guide_nodes:
+                    short_name = guide.split('|')[-1]
+                    if short_name.endswith('_locator'):
+                        prefix = short_name[:-len('_locator')]
+                        if prefix not in setup_info['prefixes']:
+                            setup_info['prefixes'].append(prefix)
             
             setups.append(setup_info)
     
     return setups
-
-
-# --- Arnold/Redshift Material Support ---
-
-def get_material_color_and_opacity_attrs(material):
-    """
-    Returns the appropriate color and opacity/transparency attribute names
-    for the given material type (Lambert, Arnold aiStandardSurface, Redshift, etc.)
-    
-    Args:
-        material (str): Material node name
-        
-    Returns:
-        tuple: (color_attr, opacity_attr) or (None, None)
-    """
-    if not material or not cmds.objExists(material):
-        return None, None
-    
-    mat_type = cmds.objectType(material)
-    
-    # Arnold aiStandardSurface
-    if mat_type == 'aiStandardSurface':
-        return f"{material}.baseColor", f"{material}.opacity"
-    
-    # Redshift
-    if mat_type == 'RedshiftStandardMaterial':
-        return f"{material}.diffuse_color", f"{material}.opacity_color"
-    
-    # Standard Maya materials
-    if cmds.attributeQuery('baseColor', node=material, exists=True):
-        opacity = f"{material}.opacity" if cmds.attributeQuery('opacity', node=material, exists=True) else None
-        return f"{material}.baseColor", opacity
-    
-    if cmds.attributeQuery('color', node=material, exists=True):
-        transparency = f"{material}.transparency" if cmds.attributeQuery('transparency', node=material, exists=True) else None
-        return f"{material}.color", transparency
-    
-    if cmds.attributeQuery('diffuseColor', node=material, exists=True):
-        return f"{material}.diffuseColor", None
-    
-    return None, None

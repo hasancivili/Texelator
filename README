@@ -1,73 +1,217 @@
-# 🎨 2D Texture Rigger for Maya
+# Texelator Core for Maya
 
-## 🛠 Installation
+Texelator Core is a Maya tool for placing, layering and animating 2D textures directly on a mesh. It creates surface-following guides, follicles and controls, then builds the required file, placement, projection and `layeredTexture` nodes.
 
-1. Drag and drop the `install.mel` file into your Maya viewport.
-2. A **"TexRig"** button will be created on your current shelf. Click it to open the tool.
+The tool supports mirrored parts, Projection and UV workflows, image sequences, Main texture layer ordering, reversible build steps and resuming an unfinished setup from the Maya scene.
 
----
+Current UI version: **Texelator v0.1.4**
 
-## 🚀 Usage
+## Installation
 
-### 1. Select Mesh & Position Locator
-* With the tool open, select your 3D mesh.
-* Click to create a locator.
-* Move the created locator to your desired texture position on the mesh.
+1. Drag `install.mel` into the Maya viewport.
+2. The installer adds a **Texelator** button to the active shelf.
+3. Click the shelf button to open the tool.
 
-### 2. Create Control System
-* Click the button in Step 2 to generate the surface-following control system.
+Texelator can also be opened from the Maya Python console:
 
-### 3. Connect Texture
-* In Step 3, select your image file.
-* If your texture has an alpha channel, it will be automatically set up for transparency.
-* Click **"Connect"** to apply the texture.
+```python
+import Texelator
+Texelator.show_ui()
+```
 
-### 4. Multiple Textures
-* You can run the tool again on the same mesh. Just provide a new **"Object Prefix"** in the tool's UI to create a separate texture rig without conflicts.
+The installer uses `assets/images/Texelator_Icon.png` for the Maya shelf button.
 
----
+## Interface identity
 
-## 🐞 Bugs and Issues
+Texelator uses a compact three-color identity:
 
-For any bugs or issues, please contact: 
-📩 [civilihasan.64@gmail.com](mailto:civilihasan.64@gmail.com)
+- Primary background: `#1E1F23`
+- Text and artwork: `#FFFFFF`
+- Accent and primary actions: `#FF6A00`
 
-<br>
+The 512×128 branded banner at the top of the window is loaded from `assets/images/Texelator_Banner.png` at its native aspect ratio. The window has a minimum width of 512 px and can grow freely; the banner remains horizontally centered at every wider size. Only the banner area uses the dedicated `#0C0D10` background. The accent color is reserved for primary build actions, the header divider, Step separators and the selected Layer Order marker.
 
-# ////////////////////////////////////////////////////////////////////////////////////////////////////// #
+Inputs, lists, dropdowns and supporting buttons use slightly raised surfaces and visible borders derived from the primary color. Disabled Steps use readable dark-grey text instead of collapsing to black.
 
-<br>
+Step title rows use an orange background with black title text. Checkboxes use a high-contrast light border when unchecked and an orange fill with a white checkmark when checked.
 
-# 🎨 Maya için 2D Doku Rigleyici
+## Project structure
 
-## 🛠 Kurulum
+```text
+Texelator Core/
+  assets/
+    images/
+      Texelator_Banner.png
+      Texelator_Checkmark.svg
+      Texelator_Icon.png
+  logic/
+    __init__.py
+    compat.py
+    step1_logic.py
+    step2_logic.py
+    step3_logic.py
+    step3_uv_logic.py
+  Main.py
+  Texelator.py
+  install.py
+  install.mel
+  README
+```
 
-1. `install.mel` dosyasını Maya görüntüleme alanınıza (viewport) sürükleyip bırakın.
-2. Mevcut rafınızda (shelf) **"TexRig"** isimli bir buton oluşacaktır. Aracı açmak için bu butona tıklayın.
+`Texelator.py` is the public Maya entry point, `Main.py` owns the UI and workflow orchestration, and the `logic` package contains the implementation for each build stage.
 
----
+## Quick workflow
 
-## 🚀 Kullanım
+1. Select a polygon mesh with valid UVs and click **Select Mesh**.
+2. Enter a part prefix and click **Create Guides**.
+3. Move the guide locator to the desired texture position.
+4. Add more parts if required and configure Mirror per part.
+5. Choose a control shape and color for each part.
+6. Click **Create Control**.
+7. Select a texture for every main part.
+8. Choose **Projection?** and **Sequence?** options as required.
+9. Arrange the Main textures in top-to-bottom **Layer Order**.
+10. Click **Build Final**.
 
-### 1. Mesh Seçimi ve Locator Konumlandırma
-* Araç açıkken, 3B meshinizi seçin.
-* Locator oluşturmak için ilgili butona tıklayın.
-* Oluşturulan locator'ı mesh üzerinde dokunun olmasını istediğiniz konuma taşıyın.
+## Build steps
 
-### 2. Kontrol Sistemi Oluşturma
-* Yüzeyi takip eden kontrol sistemini oluşturmak için Adım 2'deki butona tıklayın.
+### Step 1: Create Guides
 
-### 3. Dokuyu Bağlama
-* Adım 3'te resim dosyanızı seçin.
-* Eğer dokunuz alfa kanalına sahipse, şeffaflık için otomatik olarak ayarlanacaktır.
-* Dokuyu uygulamak için **"Bağla"** butonuna tıklayın.
+A guide defines where a texture control will be created on the selected mesh. Multiple prefixes such as `Eyes`, `Mouth` and `Brows` can be added to one setup.
 
-### 4. Birden Fazla Doku
-* Aracı aynı mesh üzerinde tekrar çalıştırabilirsiniz. Çakışma olmadan ayrı bir doku rigi oluşturmak için aracın arayüzünde yeni bir **"Nesne Ön Eki" (Object Prefix)** girmeniz yeterlidir.
+Guides remain editable until Step 2 is built. Generated follicles and technical support nodes are hidden so they do not clutter the viewport.
 
----
+### Step 2: Create Control
 
-## 🐞 Hatalar ve Sorunlar
+Texelator converts each guide into a surface-following follicle and control hierarchy. Control shape and color can be configured independently for every part.
 
-Herhangi bir hata veya sorun için lütfen iletişime geçin: 
-📩 [civilihasan.64@gmail.com](mailto:civilihasan.64@gmail.com)
+The resulting slide control drives texture placement for its Main texture.
+
+### Step 3: Build Final
+
+Texelator creates the texture networks, combines the Main texture outputs through the material `layeredTexture`, and connects the final output to the mesh material.
+
+The material connection is captured before the build. If an error occurs, the incomplete Step 3 network is rolled back instead of leaving a partially connected material.
+
+## Main textures
+
+Each part owns one Main texture and an independent placement network. Mirrored parts share one selected source image while their left and right runtime networks and controls remain independent.
+
+All Main outputs are connected to the material through the final `layeredTexture`. Their top-to-bottom order can be changed before **Build Final** and adjusted again in **Reorder Existing Layers** after the build.
+
+## Projection and UV modes
+
+### Projection
+
+When **Projection?** is enabled, Texelator builds a planar Maya `projection` network driven by a `place3dTexture`. The texture is positioned in 3D space through the generated control system.
+
+Projection is useful when the texture should behave like a movable planar card projected onto the surface. Color and alpha use the same placement matrix so the image transparency remains aligned.
+
+### UV mode
+
+When **Projection?** is disabled, the file texture is evaluated through the mesh UVs. Texelator builds a UV reference system that drives the relevant `place2dTexture` values such as translation, scale and rotation.
+
+UV mode is useful when placement should remain in the mesh UV domain rather than using a 3D projection volume.
+
+UV reference objects are collected under:
+
+```text
+Texelator_<MeshName>
+  RIG
+    UV_Refs
+```
+
+## Image sequences
+
+Enable **Sequence?** when the selected image belongs to a numbered image sequence.
+
+Texelator reads the last numeric block before the extension. Both of these formats are supported:
+
+```text
+eye_diffuse.1001.png
+eye_diffuse_0001.exr
+```
+
+The selected image folder is scanned for files with the same name pattern and extension. The detected first and last frame become the minimum and maximum values of the integer **Frame** attribute on the effective control.
+
+Example:
+
+```text
+eye.1001.png
+eye.1002.png
+...
+eye.1120.png
+```
+
+The controller range becomes `1001–1120` and drives the file node's `frameExtension`.
+
+If no valid numbered pattern is found, the safe fallback range is `0–9999`.
+
+## Mirror workflow
+
+Mirror can be configured before or after guide creation. Axis and Original Side remain editable for the selected part.
+
+A mirrored pair:
+
+- uses the same selected source image for both sides;
+- creates independent left and right placement controls;
+- mirrors the guide position dynamically;
+- updates the mirrored guide when the original guide moves;
+- keeps mirrored runtime texture networks independent.
+
+The generated side prefixes are `L_` and `R_` according to the selected Original Side.
+
+## Layer Order
+
+Layer Order lists every Main texture in its effective top-to-bottom order:
+
+```text
+[MAIN] L_Eyes
+[MAIN] R_Eyes
+[MAIN] Mouth
+```
+
+The selected row is marked with `▶`. The Up and Down buttons move the selected Main layer, and an invalid direction is disabled. The list order is used when Texelator assigns `layeredTexture.inputs[]`; input `0` is the top visible layer.
+
+## Revert behavior
+
+Only the Revert button for the latest built step is enabled.
+
+- Step 1 Revert removes the guides and returns to the selected-mesh state.
+- Step 2 Revert removes the control/follicle build and returns to the editable guides. Step 2 can then be built again without rebuilding Step 1.
+- Step 3 Revert removes only the final texture/material build and preserves the Step 3 texture paths, checkboxes and Layer Order settings.
+- Reverting Step 2 after Step 3 has been reverted also clears the Step 3 UI configuration.
+
+## Resuming an existing setup
+
+Each setup is stored under a master group named after the mesh:
+
+```text
+Texelator_<MeshName>
+```
+
+The group contains Texelator identification, stage and setup metadata. Use **Edit Existing Setup** to scan the Maya scene, load a detected setup and continue from its saved stage.
+
+A new mesh selection starts an independent setup and does not inherit the previous mesh state.
+
+## Current structural limits
+
+- The mesh must have valid UVs.
+- Each part supports one Main texture source.
+- Mirrored sides share the same source image but keep independent placement controls.
+
+## Troubleshooting
+
+- If **Build Final** fails, check the Maya Script Editor warning and verify that every required texture path still exists.
+- Use Step 3 Revert before rebuilding texture nodes after changing settings.
+- Reopen the tool after updating its Python files so Maya reloads the implementation modules.
+- Existing material inputs are restored when a failed Step 3 build is rolled back.
+
+## License
+
+Texelator is licensed under the GNU General Public License v3.0 (GPLv3).
+See [LICENSE](LICENSE) for the complete license terms.
+
+## Bugs and issues
+
+Contact: [civilihasan.64@gmail.com](mailto:civilihasan.64@gmail.com)

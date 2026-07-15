@@ -1,39 +1,37 @@
 """
-Python script to create a shelf button for the 2D Texture Rigger in Maya.
+Python script to create a shelf button for Texelator in Maya.
 This script is executed by install.mel.
-Copyright 2025 by Hasan Çivili. All Rights Reserved. (Adapted for 2D Texture Rigger)
+Copyright 2025 by Hasan Çivili. All Rights Reserved.
 """
 import os
-import sys
 import maya.cmds as cmds
-import maya.mel as mel
 
-def create_texture_rigger_shelf_button(install_script_path):
-    """Creates a shelf button for the 2D Texture Rigger."""
+def create_texelator_shelf_button(install_script_path):
+    """Creates a shelf button for Texelator."""
     try:
         if not install_script_path:
-            cmds.warning("2D Texture Rigger Installer: Script path not provided to create_texture_rigger_shelf_button.")
+            cmds.warning("Texelator Installer: Script path not provided.")
             return
 
-        # script_dir is the directory where install.py (and uv_locator_tool.py) are located.
+        # The project root contains install.py, Texelator.py and the assets folder.
         script_dir = os.path.dirname(install_script_path)
         script_dir_norm = os.path.normpath(script_dir)
 
-        # The main tool script is TextureRiggerTool.py
-        tool_module_name = "TextureRiggerTool" # Changed from "uv_locator_tool"
+        tool_module_name = "Texelator"
         tool_script_file = tool_module_name + ".py"
         tool_script_path_full = os.path.join(script_dir_norm, tool_script_file)
 
         if not os.path.exists(tool_script_path_full):
-            cmds.warning(f"2D Texture Rigger Installer: Main tool script '{tool_script_file}' not found at: {tool_script_path_full}")
+            cmds.warning(f"Texelator Installer: Main tool script '{tool_script_file}' not found at: {tool_script_path_full}")
             return
 
-        icon_name = "texture_rigger_icon.png"  # Ensure this icon exists in the same directory
-        icon_path = os.path.join(script_dir_norm, icon_name)
+        icon_name = "Texelator_Icon.png"
+        icon_path = os.path.join(
+            script_dir_norm, "assets", "images", icon_name)
         icon_path_norm = os.path.normpath(icon_path)
 
         if not os.path.exists(icon_path_norm):
-            cmds.warning(f"2D Texture Rigger Installer: Icon file '{icon_name}' not found at: {icon_path_norm}. Using default Maya icon.")
+            cmds.warning(f"Texelator Installer: Icon file '{icon_name}' not found at: {icon_path_norm}. Using default Maya icon.")
             icon_path_for_shelf = "pythonFamily.png"  # Default Maya icon
         else:
             icon_path_for_shelf = icon_path_norm
@@ -49,7 +47,7 @@ def create_texture_rigger_shelf_button(install_script_path):
         escaped_tool_dir = script_dir_norm.replace("\\\\", "/").replace("\\", "/")
 
         # This is the command that the shelf button will execute.
-        # It correctly imports 'TextureRiggerTool' and calls its 'show_ui' function.
+        # It imports Texelator and calls its show_ui function.
         shelf_command = f"""
 import sys
 import os
@@ -63,23 +61,17 @@ if tool_dir not in sys.path:
     sys.path.append(tool_dir)
 
 try:
-    # Dynamically import the module
     module_to_run = importlib.import_module(tool_module_name)
-    # Reload for development convenience
-    importlib.reload(module_to_run)
-    # Call the UI function
+    module_to_run = importlib.reload(module_to_run)
     module_to_run.show_ui()
 except ImportError as e_import:
-    error_msg = f"2D Texture Rigger: IMPORT ERROR - {{e_import}}. Could not import '{{tool_module_name}}'. Ensure it is in: {{tool_dir}}."
-    print(error_msg)
+    error_msg = f"Texelator: IMPORT ERROR - {{e_import}}. Could not import '{{tool_module_name}}'. Ensure it is in: {{tool_dir}}."
     cmds.warning(error_msg)
 except AttributeError as e_attr:
-    error_msg = f"2D Texture Rigger: ATTRIBUTE ERROR - {{e_attr}}. Could not find 'show_ui' in '{{tool_module_name}}'."
-    print(error_msg)
+    error_msg = f"Texelator: ATTRIBUTE ERROR - {{e_attr}}. Could not find 'show_ui' in '{{tool_module_name}}'."
     cmds.warning(error_msg)
 except Exception as e_runtime:
-    error_msg = f"2D Texture Rigger: RUNTIME ERROR - {{e_runtime}}."
-    print(error_msg)
+    error_msg = f"Texelator: RUNTIME ERROR - {{e_runtime}}."
     cmds.warning(error_msg)
 """
 
@@ -88,7 +80,7 @@ except Exception as e_runtime:
         existing_button = None
         for btn in shelf_buttons:
             try:
-                if cmds.shelfButton(btn, query=True, label=True) == "2D Texture Rigger": # Check for old or default label
+                if cmds.shelfButton(btn, query=True, label=True) in ("2D Texture Rigger", "Texture Rigger", "Texelator"):
                     existing_button = btn
                     break
                 if cmds.shelfButton(btn, query=True, command=True) == shelf_command: # More robust check by command
@@ -97,51 +89,50 @@ except Exception as e_runtime:
             except RuntimeError: # Button might not be a shelfButton or might be deleted
                 pass
 
-        button_label = "Texture Rigger" # <<< YENİ ETİKETİNİZİ BURAYA GİRİN
+        button_label = "Texelator"
 
         if existing_button:
-            print(f"2D Texture Rigger Installer: Updating existing shelf button '{button_label}' on shelf '{shelf_name}'.")
+            print(f"Texelator Installer: Updating existing shelf button '{button_label}' on shelf '{shelf_name}'.")
             cmds.shelfButton(
                 existing_button,
                 edit=True,
                 label=button_label,
                 command=shelf_command,
                 image=icon_path_for_shelf,
-                imageOverlayLabel="", # Kısa overlay etiketi
-                annotation="Runs the 2D Texture Rigger tool.",
+                imageOverlayLabel="", # Keep the shelf icon unobstructed.
+                annotation="Runs Texelator.",
                 sourceType="python"
             )
         else:
-            print(f"2D Texture Rigger Installer: Creating new shelf button '{button_label}' on shelf '{shelf_name}'.")
+            print(f"Texelator Installer: Creating new shelf button '{button_label}' on shelf '{shelf_name}'.")
             cmds.shelfButton(
                 parent=shelf_name,
                 label=button_label,
                 command=shelf_command,
                 image=icon_path_for_shelf,
-                imageOverlayLabel="", # Kısa overlay etiketi
-                annotation="Runs the 2D Texture Rigger tool.",
+                imageOverlayLabel="", # Keep the shelf icon unobstructed.
+                annotation="Runs Texelator.",
                 sourceType="python"
             )
 
         cmds.confirmDialog(
-            title="2D Texture Rigger Installer",
-            message=f"2D Texture Rigger shelf button installed/updated on shelf '{shelf_name}' successfully!",
+            title="Texelator Installer",
+            message=f"Texelator shelf button installed/updated on shelf '{shelf_name}' successfully!",
             button="OK"
         )
 
     except Exception as e:
-        error_message = f"2D Texture Rigger Installer: Failed to create shelf button. Error: {e}"
-        print(error_message)
+        error_message = f"Texelator Installer: Failed to create shelf button. Error: {e}"
         import traceback
         traceback.print_exc()
         cmds.warning(error_message)
 
 if __name__ == "__main__":
     # This block is executed when install.mel runs `exec(code_to_exec)`
-    # TEXTURERIGGER_SCRIPT_PATH is globally defined by install.mel's python execution context.
-    if 'TEXTURERIGGER_SCRIPT_PATH' in globals():
-        create_texture_rigger_shelf_button(globals()['TEXTURERIGGER_SCRIPT_PATH'])
+    # TEXELATOR_SCRIPT_PATH is globally defined by install.mel's Python execution context.
+    if 'TEXELATOR_SCRIPT_PATH' in globals():
+        create_texelator_shelf_button(globals()['TEXELATOR_SCRIPT_PATH'])
     else:
         # This case should ideally not happen if install.mel is used.
-        cmds.error("2D Texture Rigger Installer: TEXTURERIGGER_SCRIPT_PATH global variable not found. Cannot determine script path for installation.")
+        cmds.error("Texelator Installer: TEXELATOR_SCRIPT_PATH global variable not found. Cannot determine script path for installation.")
 

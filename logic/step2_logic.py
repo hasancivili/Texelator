@@ -1,5 +1,6 @@
 import maya.cmds as cmds
 import maya.OpenMaya as om
+from .compat import create_compatible_math_node
 
 # Control shape definitions
 CONTROL_SHAPES = ['circle', 'square', 'diamond', 'triangle', 'arrow']
@@ -121,7 +122,6 @@ def get_uv_at_point(mesh_shape, world_point_mvector):
         v_val = cmds.getAttr(f"{cpos_node}.result.parameterV")
         
         if u_val is not None and v_val is not None:
-            print(f"Found UV coordinates ({u_val}, {v_val}) for point ({world_point_mvector.x}, {world_point_mvector.y}, {world_point_mvector.z})")
             return float(u_val), float(v_val)
         else:
             cmds.warning(f"Could not get UV coordinates using closestPointOnMesh node.")
@@ -134,7 +134,7 @@ def get_uv_at_point(mesh_shape, world_point_mvector):
         if cpos_node and cmds.objExists(cpos_node):
             cmds.delete(cpos_node)
 
-def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textureRigger"):
+def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="texelator"):
     """
     Creates a follicle and a null group inside it on the specified mesh at the given UV coordinates.
     
@@ -142,7 +142,7 @@ def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textur
         mesh_shape_name (str): Name of the mesh shape node.
         u_coord (float): U coordinate.
         v_coord (float): V coordinate.
-        name_prefix (str, optional): Name prefix for the follicle. Defaults to "textureRigger".
+        name_prefix (str, optional): Name prefix for the follicle. Defaults to "texelator".
     
     Returns:
         tuple: (follicle_transform_name, parent_group_name) or (None, None)
@@ -152,7 +152,7 @@ def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textur
         return None, None
 
     # Clean and use the name prefix
-    clean_prefix = name_prefix if name_prefix else "textureRigger"
+    clean_prefix = name_prefix if name_prefix else "texelator"
     follicle_name = f"{clean_prefix}_follicle#"
 
     # Create follicle shape and transform
@@ -190,7 +190,6 @@ def create_follicle_at_uv(mesh_shape_name, u_coord, v_coord, name_prefix="textur
     cmds.setAttr(f"{parent_grp_name}.rotate", 0, 0, 0)
     cmds.setAttr(f"{parent_grp_name}.scale", 1, 1, 1)
 
-    print(f"Follicle '{follicle_transform_name}' and parent group '{parent_grp_name}' created at UV ({u_coord}, {v_coord}).")
     return follicle_transform_name, parent_grp_name
 
 def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, ctrl_shape='circle', ctrl_color='Default'):
@@ -208,12 +207,7 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, 
         tuple: (slide_ctrl_name, bind_joint_name) if successful, otherwise (None, None)
     """
     try:
-        # Organize node names
-        # base_name = follicle_transform.split('|')[-1].split(':')[-1]  # Name without namespace and full path
-        # if not base_name: 
-        #     base_name = "follicleSetup"
-        #     print(f"Valid name not found, using default name: {base_name}")
-        base_name = node_prefix # Use the incoming prefix directly
+        base_name = node_prefix
 
         compose_matrix_node = cmds.createNode("composeMatrix", name=f"{base_name}_compMat")
         mult_matrix_node = cmds.createNode("multMatrix", name=f"{base_name}_multMat")
@@ -266,22 +260,22 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, 
         cmds.connectAttr(f"{slide_ctrl}.translate", f"{translate_invert_node}.input1", force=True)
         cmds.connectAttr(f"{translate_invert_node}.output", f"{invert_grp}.translate", force=True)
 
-        invert_u_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Invert_U")
-        invert_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Invert_V")
+        invert_u_node = create_compatible_math_node("multDL", "multDoubleLinear", f"{base_name}_Invert_U")
+        invert_v_node = create_compatible_math_node("multDL", "multDoubleLinear", f"{base_name}_Invert_V")
         cmds.connectAttr(f"{slide_ctrl}.translateX", f"{invert_u_node}.input1", force=True)
         cmds.connectAttr(f"{slide_ctrl}.translateY", f"{invert_v_node}.input1", force=True)
         cmds.setAttr(f"{invert_u_node}.input2", 1)
         cmds.setAttr(f"{invert_v_node}.input2", 1)
 
-        precision_u_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Precision_U")
-        precision_v_node = cmds.createNode("multDoubleLinear", name=f"{base_name}_Precision_V")
+        precision_u_node = create_compatible_math_node("multDL", "multDoubleLinear", f"{base_name}_Precision_U")
+        precision_v_node = create_compatible_math_node("multDL", "multDoubleLinear", f"{base_name}_Precision_V")
         cmds.connectAttr(f"{invert_u_node}.output", f"{precision_u_node}.input1", force=True)
         cmds.connectAttr(f"{invert_v_node}.output", f"{precision_v_node}.input1", force=True)
         cmds.connectAttr(f"{slide_ctrl}.Precision", f"{precision_u_node}.input2", force=True)
         cmds.connectAttr(f"{slide_ctrl}.Precision", f"{precision_v_node}.input2", force=True)
 
-        pos_u_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_U_driver")
-        pos_v_node = cmds.createNode("addDoubleLinear", name=f"{base_name}_pos_V_driver")
+        pos_u_node = create_compatible_math_node("addDL", "addDoubleLinear", f"{base_name}_pos_U_driver")
+        pos_v_node = create_compatible_math_node("addDL", "addDoubleLinear", f"{base_name}_pos_V_driver")
         cmds.connectAttr(f"{precision_u_node}.output", f"{pos_u_node}.input1", force=True)
         cmds.connectAttr(f"{precision_v_node}.output", f"{pos_v_node}.input1", force=True)
 
@@ -330,7 +324,7 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, 
 
         curve_obj_shape_list = cmds.listRelatives(slide_ctrl, shapes=True, type="nurbsCurve", fullPath=True)
         if not curve_obj_shape_list:
-            print(f"No NURBS curve shape found under Slide_ctrl '{slide_ctrl}'. Skipping CV manipulation.")
+            pass
         else:
             curve_obj_shape = curve_obj_shape_list[0]
             cv_list = cmds.ls(f"{curve_obj_shape}.cv[*]", flatten=True)
@@ -357,16 +351,29 @@ def setup_follicle_connections(follicle_transform, follicle_shape, node_prefix, 
             # Rotate CVs
             cmds.rotate(90, 0, 0, f"{curve_obj_shape}.cv[*]", relative=True, objectSpace=True)
             cmds.move(0, 0, 0.02, f"{curve_obj_shape}.cv[*]", relative=True, objectSpace=True, worldSpaceDistance=True)
-            print("Curve CV manipulation successfully applied.")
 
-        print(f"Advanced follicle setup applied for '{follicle_transform}'.")
+        utility_nodes = (
+            compose_matrix_node, mult_matrix_node, decompose_matrix_node,
+            translate_invert_node, invert_u_node, invert_v_node,
+            precision_u_node, precision_v_node, pos_u_node, pos_v_node,
+            clamp_node)
+        if not cmds.attributeQuery(
+                'texelatorUtilityNodes', node=follicle_transform, exists=True):
+            cmds.addAttr(
+                follicle_transform, longName='texelatorUtilityNodes',
+                attributeType='message', multi=True)
+        for index, node in enumerate(utility_nodes):
+            cmds.connectAttr(
+                f'{node}.message',
+                f'{follicle_transform}.texelatorUtilityNodes[{index}]',
+                force=True)
         return slide_ctrl, bind_joint
         
     except Exception as e:
         cmds.warning(f"Error creating advanced follicle connections: {e}")
         return None, None
 
-def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger", ctrl_shape='circle', ctrl_color='Default'):
+def run_step2_logic(mesh_shape_name, locator_name, name_prefix="texelator", ctrl_shape='circle', ctrl_color='Default'):
     """
     Runs the main logic of Step 2: Get UV from locator position, create follicle
     and apply advanced follicle connections.
@@ -374,7 +381,7 @@ def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger", 
     Args:
         mesh_shape_name (str): Name of the mesh shape node.
         locator_name (str): Name of the locator transform node.
-        name_prefix (str, optional): Name prefix for objects to be created. Defaults to "textureRigger".
+        name_prefix (str, optional): Name prefix for objects to be created. Defaults to "texelator".
         ctrl_shape (str, optional): Shape type for control curve. Defaults to 'circle'.
         ctrl_color (str, optional): Color name for control curve. Defaults to 'Default'.
     
@@ -403,8 +410,6 @@ def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger", 
 
     if uv_coords:
         u, v = uv_coords
-        print(f"UV corresponding to locator position: ({u}, {v})")
-        
         # 1. Create follicle and parent_grp
         follicle_transform, initial_parent_group = create_follicle_at_uv(mesh_shape_name, u, v, name_prefix) # Pass original name_prefix for follicle creation
         if follicle_transform and initial_parent_group:
@@ -424,7 +429,6 @@ def run_step2_logic(mesh_shape_name, locator_name, name_prefix="textureRigger", 
                 # Delete parent_grp if it's no longer used
                 if initial_parent_group and cmds.objExists(initial_parent_group):
                     cmds.delete(initial_parent_group)
-                    print(f"Initial parent_grp '{initial_parent_group}' deleted.")
                 
                 # Select the slide control object
                 cmds.select(slide_ctrl, replace=True)

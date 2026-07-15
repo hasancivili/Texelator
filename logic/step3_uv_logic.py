@@ -1,6 +1,6 @@
 import maya.cmds as cmds
 import os
-import step3_logic
+from . import step3_logic
 
 def create_texture_uv_setup(prefix, follicle_transform, slide_ctrl):
     """
@@ -81,6 +81,7 @@ def create_texture_uv_setup(prefix, follicle_transform, slide_ctrl):
         cmds.connectAttr(f'{follicle_shape}.parameterV', f'{tex_ctrl}.translateY', force=True)
     
     # Connect slide control to texture control
+    scale_md = None
     if cmds.objExists(slide_ctrl):
         # Connect rotation directly
         cmds.connectAttr(f'{slide_ctrl}.rotateZ', f'{tex_ctrl}.rotateZ', force=True)
@@ -99,7 +100,9 @@ def create_texture_uv_setup(prefix, follicle_transform, slide_ctrl):
         'tex_rotate': tex_rotate,
         'tex_ref': tex_ref,
         'tex_ctrl': tex_ctrl,
-        'constraints_grp': constraints_grp
+        'constraints_grp': constraints_grp,
+        'reverse_rotation_node': md_node,
+        'scale_factor_node': scale_md
     }
 
 def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, follicle_transform=None):
@@ -130,66 +133,8 @@ def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, foll
         cmds.warning(f"Failed to find, create, or assign a suitable material for mesh '{mesh_transform}'. Cannot connect texture.")
         return None, None, None, None, None, None
     
-    print(f"Using material '{material}' for texture connection")
-    
-    # Get material name for layered texture naming
-    material_name = material.split('|')[-1].split(':')[-1]
-    material_prefix = material_name.split('_')[0] if '_' in material_name else material_name
-    layered_texture_name = f"{material_prefix}_layeredTexture"
-    
-    # Check if material already has a texture connected to its baseColor or color
-    material_color_attr = None
-    if cmds.attributeQuery('baseColor', node=material, exists=True):
-        material_color_attr = f"{material}.baseColor"
-    elif cmds.attributeQuery('color', node=material, exists=True):
-        material_color_attr = f"{material}.color"
-    elif cmds.attributeQuery('diffuseColor', node=material, exists=True):
-        material_color_attr = f"{material}.diffuseColor"
-    
-    if not material_color_attr:
-        cmds.warning(f"Cannot find color attribute on material '{material}'.")
-        return None, None, None, None, None, None
-    
-    # Check if anything is connected to the color attribute
-    material_color_connections = cmds.listConnections(material_color_attr, source=True, destination=False, plugs=True)
-    
-    # Initialize variables before they are used
-    existing_connection_to_layer = False
-    layered_texture_node = None
-    
-    # Check if what's connected is a layeredTexture (from previous runs of this tool)
-    if material_color_connections:
-        connected_node = material_color_connections[0].split('.')[0]
-        if cmds.objectType(connected_node) == 'layeredTexture':
-            layered_texture_node = connected_node
-            existing_connection_to_layer = True
-            print(f"Found existing layeredTexture node '{layered_texture_node}' connected to material")
-    
-    # Create a file texture node
-    file_node = cmds.shadingNode('file', asTexture=True, name=f"{name_prefix}_texture")
-    # Set the file path
-    cmds.setAttr(f"{file_node}.fileTextureName", image_file_path, type="string")
-    # Set defaultColor to [0, 0, 0]
-    cmds.setAttr(f"{file_node}.defaultColor", 0, 0, 0, type="double3")
-    
-    # Create a place2dTexture node for the file
-    place2d_node = cmds.shadingNode('place2dTexture', asUtility=True, name=f"{name_prefix}_place2d")
-    
-    # Connect place2dTexture to file node
-    place2d_attrs = [
-        "coverage", "translateFrame", "rotateFrame", "mirrorU", "mirrorV", 
-        "stagger", "wrapU", "wrapV", "repeatUV", "offset", "rotateUV", 
-        "noiseUV", "vertexUvOne", "vertexUvTwo", "vertexUvThree", 
-        "vertexCameraOne", "outUV", "outUvFilterSize"
-    ]
-    
-    for attr in place2d_attrs:
-        if cmds.attributeQuery(attr, node=place2d_node, exists=True) and \
-           cmds.attributeQuery(attr, node=file_node, exists=True):
-            try:
-                cmds.connectAttr(f"{place2d_node}.{attr}", f"{file_node}.{attr}", force=True)
-            except Exception:
-                print(f"Failed to connect {attr}")
+    file_node, place2d_node = step3_logic.create_file_texture_network(
+        image_file_path, name_prefix, black_default=True)
     
     # Find the slide_ctrl
     slide_ctrl = None
@@ -219,86 +164,22 @@ def connect_texture_using_uvs(mesh_transform, image_file_path, name_prefix, foll
         cmds.connectAttr(f"{tex_ref}.TranslateU", f"{place2d_node}.translateFrameU", force=True)
         cmds.connectAttr(f"{tex_ref}.TranslateV", f"{place2d_node}.translateFrameV", force=True)
     else:
-        print(f"Warning: No slide_ctrl found for {name_prefix}. UV reference setup skipped.")
-    
-    # Handle connection to material based on whether there's an existing texture
-    if material_color_connections and not existing_connection_to_layer:
-        # There's an existing texture but not a layeredTexture, so create one
-        layered_texture_node = cmds.shadingNode('layeredTexture', asTexture=True, name=layered_texture_name)
-        
-        # Connect the existing texture to layer 1 (index 1)
-        existing_texture_out = material_color_connections[0]
-        
-        # Disconnect existing texture from material
-        cmds.disconnectAttr(existing_texture_out, material_color_attr)
-        
-        # Connect existing texture to layer 1 (not layer 0)
-        cmds.connectAttr(existing_texture_out, f"{layered_texture_node}.inputs[1].color", force=True)
-        
-        # Connect new file texture to layer 0 (top layer)
-        cmds.connectAttr(f"{file_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-        
-        # Connect file's outAlpha to layer 0's alpha
-        cmds.connectAttr(f"{file_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-        
-        # Connect layeredTexture to material
-        cmds.connectAttr(f"{layered_texture_node}.outColor", material_color_attr, force=True)
-        
-        print(f"Created layeredTexture with existing texture at layer 1 and new texture at layer 0 (top)")
-        
-    elif existing_connection_to_layer:
-        # Already have a layeredTexture, shift all existing layers down and put new one at index 0
-        max_layer_index = step3_logic.get_max_layer_index(layered_texture_node)
-        if max_layer_index >= 0:
-            # Shift layers down
-            step3_logic.shift_layers_down(layered_texture_node, max_layer_index)
-            
-            # Connect new file texture to top layer (index 0)
-            cmds.connectAttr(f"{file_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-            
-            # Connect file's outAlpha to layer 0's alpha
-            cmds.connectAttr(f"{file_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-            
-            print(f"Shifted all layers down and connected new texture to top layer (layer 0)")
-        else:
-            # If no layers found, just connect to layer 0
-            cmds.connectAttr(f"{file_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-            
-            # Connect file's outAlpha to layer 0's alpha
-            cmds.connectAttr(f"{file_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-            
-            print(f"Connected new texture to layer 0 of empty layeredTexture")
-    else:
-        # No existing texture, create layered texture for future expansion
-        layered_texture_node = cmds.shadingNode('layeredTexture', asTexture=True, name=layered_texture_name)
-        
-        # Connect file texture to layer 0
-        cmds.connectAttr(f"{file_node}.outColor", f"{layered_texture_node}.inputs[0].color", force=True)
-        
-        # Connect file's outAlpha to layer 0's alpha
-        cmds.connectAttr(f"{file_node}.outAlpha", f"{layered_texture_node}.inputs[0].alpha", force=True)
-        
-        # Connect layeredTexture to material
-        try:
-            cmds.connectAttr(f"{layered_texture_node}.outColor", material_color_attr, force=True)
-            print(f"Created new layeredTexture with texture at layer 0")
-        except Exception as e:
-            cmds.warning(f"Failed to connect layered texture to material: {e}")
-            # Clean up nodes if connection failed
-            cmds.delete(file_node, place2d_node)
-            if tex_ref_setup and 'uv_ref' in tex_ref_setup:
-                cmds.delete(tex_ref_setup['uv_ref'])
-            if cmds.objExists(layered_texture_node):
-                cmds.delete(layered_texture_node)
-            return None, None, None, None, None, None
-    
-    print(f"Connected texture '{os.path.basename(image_file_path)}' to material '{material}' using UV-based method")
+        cmds.warning(f"No slide control found for '{name_prefix}'; UV setup was skipped.")
+
+    layered_texture_node = step3_logic.connect_source_to_material_layer(
+        material, f'{file_node}.outColor', f'{file_node}.outAlpha')
+    if not layered_texture_node:
+        cmds.delete(file_node, place2d_node)
+        if tex_ref_setup and cmds.objExists(tex_ref_setup.get('uv_ref')):
+            cmds.delete(tex_ref_setup['uv_ref'])
+        return None, None, None, None, None, None
     
     # Return tuple for the run_step3_logic function to use
     uv_ref_group = tex_ref_setup['uv_ref'] if tex_ref_setup else None
     return file_node, place2d_node, tex_ref_setup, layered_texture_node, material, uv_ref_group
 
-def run_step3_uv_logic(mesh_transform, image_file_path=None, name_prefix="textureRigger", follicle_transform=None, is_sequence=False):
+def run_step3_uv_logic(mesh_transform, image_file_path=None, name_prefix="texelator",
+                       follicle_transform=None, is_sequence=False, master_group_name=None):
     """
     Main logic for Step 3 UV-based texture connection: Connects texture using UVs and organizes scene.
     
@@ -309,13 +190,11 @@ def run_step3_uv_logic(mesh_transform, image_file_path=None, name_prefix="textur
         follicle_transform (str, optional): Follicle transform node name
         is_sequence (bool, optional): Whether the texture is a sequence
         
-    Returns:
-        tuple: (file_node, None, place2d_node, None, layered_texture, material_node, updated_mesh_transform)
-        or (None, None, None, None, None, None, original_mesh_transform_if_failed)
+    Returns the UV nodes, material, mesh path and tracked UV setup nodes.
     """
     if not image_file_path:
         cmds.warning("No image file path provided for texture connection.")
-        return None, None, None, None, None, None, mesh_transform
+        return None, None, None, None, None, None, mesh_transform, {}
     
     file_node, place2d_node, tex_ref_setup, layered_texture, material, uv_ref_group = connect_texture_using_uvs(
         mesh_transform, 
@@ -328,7 +207,7 @@ def run_step3_uv_logic(mesh_transform, image_file_path=None, name_prefix="textur
 
     if not file_node: 
         cmds.warning(f"Texture connection failed for prefix '{name_prefix}'.")
-        return None, None, None, None, None, None, mesh_transform
+        return None, None, None, None, None, None, mesh_transform, {}
 
     # Find slide_ctrl for the follicle
     slide_ctrl = None
@@ -350,25 +229,14 @@ def run_step3_uv_logic(mesh_transform, image_file_path=None, name_prefix="textur
     # Use the same organizing function but with None for place3d_node
     if follicle_transform: 
         place3d_node_substitute = None  # No place3dTexture for UV-based method
-        updated_mesh_path_after_organization = step3_logic.organize_scene_hierarchy(mesh_transform, follicle_transform, place3d_node_substitute, name_prefix)
+        updated_mesh_path_after_organization = step3_logic.organize_scene_hierarchy(
+            mesh_transform, follicle_transform, place3d_node_substitute,
+            name_prefix, master_group_name=master_group_name)
         
-        # Move the UV_Ref group under the Texture_ctrl_grp AFTER scene organization
-        if tex_ref_setup and 'uv_ref' in tex_ref_setup and cmds.objExists(tex_ref_setup['uv_ref']):
-            texture_ctrl_grp_name = f"{name_prefix}_Texture_ctrl_grp"
-            # Find the group in the RIG hierarchy
-            rig_group = "RIG"
-            if cmds.objExists(rig_group) and cmds.objExists(texture_ctrl_grp_name):
-                # Get the full path of the texture control group to ensure proper parenting
-                texture_ctrl_grp_path = cmds.ls(texture_ctrl_grp_name, long=True)[0]
-                
-                # Parent the UV_Ref under the texture control group
-                try:
-                    cmds.parent(tex_ref_setup['uv_ref'], texture_ctrl_grp_path)
-                    print(f"Parented {tex_ref_setup['uv_ref']} under {texture_ctrl_grp_path}")
-                except Exception as e:
-                    cmds.warning(f"Failed to parent UV_Ref under Texture_ctrl_grp: {e}")
     else:
         cmds.warning(f"Skipping scene organization for prefix '{name_prefix}' due to missing follicle node.")
             
     # Return None for projection_node and place3d_node since we're not using them in the UV-based method
-    return file_node, None, place2d_node, None, layered_texture, material, updated_mesh_path_after_organization
+    details = {'uv_setup': tex_ref_setup}
+    return (file_node, None, place2d_node, None, layered_texture, material,
+            updated_mesh_path_after_organization, details)

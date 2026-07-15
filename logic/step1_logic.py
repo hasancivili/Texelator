@@ -1,12 +1,11 @@
 import maya.cmds as cmds
-import maya.OpenMaya as om
+from .compat import create_compatible_math_node
 
 # Module-level variables to store reference objects
 _ref_follicle_transform = None
 _ref_follicle_shape = None
 _ref_null_group = None
-_ref_mesh_transform = None
-_ref_mesh_shape = None
+
 
 def has_uv_map(mesh_shape):
     """
@@ -37,7 +36,7 @@ def has_uv_map(mesh_shape):
             
         return False
     except Exception as e:
-        print(f"Error checking UV map for mesh '{mesh_shape}': {e}")
+        cmds.warning(f"Could not inspect UVs on '{mesh_shape}': {e}")
         return False
 
 def create_reference_follicle(mesh_transform, mesh_shape):
@@ -85,8 +84,9 @@ def create_reference_follicle(mesh_transform, mesh_shape):
         
         # Create null group inside follicle
         null_group = cmds.group(empty=True, name="PosRefNull", parent=follicle_transform)
-        
-        print(f"Created reference follicle at UV (0.5, 0.5) on mesh '{mesh_transform}'")
+
+        # PosRefFol is an internal placement reference; it should never clutter the viewport.
+        cmds.setAttr(f"{follicle_transform}.visibility", 0)
         
         # Store the references globally
         _ref_follicle_transform = follicle_transform
@@ -126,77 +126,29 @@ def create_locator_at_null_position(name_prefix):
         # Position locator at null's world position
         cmds.xform(locator, translation=null_world_pos, worldSpace=True)
         
-        print(f"Created locator '{locator}' at position: {null_world_pos}")
         return locator
         
     except Exception as e:
         cmds.warning(f"Error creating locator: {e}")
         return None
 
-def run_step1_logic(name_prefix, existing_mesh_transform=None, existing_mesh_shape=None):
-    """
-    Main function for Step 1 logic:
-    - If mesh transform/shape provided, uses them
-    - Otherwise uses currently selected mesh
-    - Creates reference follicle if it doesn't exist
-    - Creates locator with given prefix at the position of reference null
-    
-    Args:
-        name_prefix (str): Prefix for locator name
-        existing_mesh_transform (str, optional): Name of mesh transform to use
-        existing_mesh_shape (str, optional): Name of mesh shape to use
-        
-    Returns:
-        tuple: (mesh_transform, mesh_shape, locator_name) or (None, None, None) if failed
-    """
-    global _ref_follicle_transform, _ref_follicle_shape, _ref_null_group, _ref_mesh_transform, _ref_mesh_shape
-    
-    mesh_transform_to_use = existing_mesh_transform
-    mesh_shape_to_use = existing_mesh_shape
-    
-    # If reference follicle already exists and mesh hasn't changed, skip to creating locator
-    if _ref_follicle_transform and _ref_null_group and _ref_mesh_transform == mesh_transform_to_use:
-        print(f"Using existing reference follicle on mesh '{_ref_mesh_transform}'")
-        locator = create_locator_at_null_position(name_prefix)
-        if locator:
-            return _ref_mesh_transform, _ref_mesh_shape, locator
-        return None, None, None
-    
-    # Otherwise, create new reference follicle
-    follicle_transform, follicle_shape, null_group = create_reference_follicle(mesh_transform_to_use, mesh_shape_to_use)
-    
-    if follicle_transform and null_group:
-        _ref_mesh_transform = mesh_transform_to_use
-        _ref_mesh_shape = mesh_shape_to_use
-        
-        # Now create the locator
-        locator = create_locator_at_null_position(name_prefix)
-        if locator:
-            return mesh_transform_to_use, mesh_shape_to_use, locator
-    
-    return None, None, None
-
 def clear_reference_follicle():
     """
     Clears the stored references to the follicle and null group.
     This should be called when resetting the tool state.
     """
-    global _ref_follicle_transform, _ref_follicle_shape, _ref_null_group, _ref_mesh_transform, _ref_mesh_shape
+    global _ref_follicle_transform, _ref_follicle_shape, _ref_null_group
     
     if _ref_follicle_transform and cmds.objExists(_ref_follicle_transform):
         try:
             cmds.delete(_ref_follicle_transform)
-            print(f"Deleted reference follicle '{_ref_follicle_transform}'")
         except Exception as e:
-            print(f"Could not delete reference follicle: {e}")
+            cmds.warning(f"Could not delete reference follicle: {e}")
     
     # Clear all references
     _ref_follicle_transform = None
     _ref_follicle_shape = None
     _ref_null_group = None 
-    _ref_mesh_transform = None
-    _ref_mesh_shape = None
-    print("Cleared all reference follicle data")
 
 
 def create_mirrored_locator(original_locator, mesh_transform, mirror_axis='X', mirror_prefix=''):
@@ -240,10 +192,49 @@ def create_mirrored_locator(original_locator, mesh_transform, mirror_axis='X', m
         mirror_locator = cmds.spaceLocator(name=mirror_locator_name)[0]
         cmds.xform(mirror_locator, translation=mirrored_pos, worldSpace=True)
         
-        print(f"Created mirrored locator '{mirror_locator}' at position: {mirrored_pos} (mirrored from {pos})")
         return mirror_locator
         
     except Exception as e:
         cmds.warning(f"Error creating mirrored locator: {e}")
         return None
+
+
+def connect_mirror_guide(original_locator, guide_locator, mesh_transform, mirror_axis='X', node_prefix='TexelatorMirror'):
+    """Drive a guide locator as a live world-space mirror of an editable locator."""
+    if not all(cmds.objExists(node) for node in (original_locator, guide_locator, mesh_transform)):
+        cmds.warning("Cannot create mirror guide: original, guide, or mesh is missing.")
+        return []
+    axis_index = {'X': 0, 'Y': 1, 'Z': 2}.get(mirror_axis.upper(), 0)
+    axis_names = ('X', 'Y', 'Z')
+    bounding_box = cmds.exactWorldBoundingBox(mesh_transform)
+    centre = [(bounding_box[i] + bounding_box[i + 3]) / 2.0 for i in range(3)]
+    created_nodes = []
+    try:
+        for index, axis_name in enumerate(axis_names):
+            destination = f"{guide_locator}.translate{axis_name}"
+            cmds.setAttr(destination, lock=False)
+            for source in cmds.listConnections(destination, source=True, destination=False, plugs=True) or []:
+                cmds.disconnectAttr(source, destination)
+            if index == axis_index:
+                invert = cmds.createNode('multiplyDivide', name=f"{node_prefix}_mirror{axis_name}_invert#")
+                offset = create_compatible_math_node('addDL', 'addDoubleLinear', f"{node_prefix}_mirror{axis_name}_offset#")
+                cmds.setAttr(f"{invert}.input2X", -1)
+                cmds.setAttr(f"{offset}.input2", 2.0 * centre[index])
+                cmds.connectAttr(f"{original_locator}.translate{axis_name}", f"{invert}.input1X", force=True)
+                cmds.connectAttr(f"{invert}.outputX", f"{offset}.input1", force=True)
+                cmds.connectAttr(f"{offset}.output", destination, force=True)
+                created_nodes.extend([invert, offset])
+            else:
+                cmds.connectAttr(f"{original_locator}.translate{axis_name}", destination, force=True)
+            cmds.setAttr(destination, lock=True, keyable=False, channelBox=False)
+        for shape in cmds.listRelatives(guide_locator, shapes=True, fullPath=True) or []:
+            cmds.setAttr(f"{shape}.overrideEnabled", 1)
+            cmds.setAttr(f"{shape}.overrideColor", 18)
+        return created_nodes
+    except Exception as error:
+        cmds.warning(f"Could not connect mirror guide: {error}")
+        for node in created_nodes:
+            if cmds.objExists(node):
+                cmds.delete(node)
+        return []
 

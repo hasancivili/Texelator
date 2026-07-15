@@ -1,13 +1,13 @@
 /*
-2D Texture Rigger Installer
+Texelator Installer
 Drag and drop this file into the Maya viewport to install.
-Copyright 2025 by Hasan Civili. All Rights Reserved. (Adapted for 2D Texture Rigger)
+Copyright 2025 by Hasan Civili. All Rights Reserved.
 */
 
-global proc textureRiggerToolInstall() {
+global proc texelatorInstall() {
     // Get the path of this MEL script
     // whatIs returns "Mel procedure found in: /path/to/install.mel"
-    string $whatIsResult = `whatIs textureRiggerToolInstall`;
+    string $whatIsResult = `whatIs texelatorInstall`;
     string $scriptPathPrefix = "Mel procedure found in: ";
     int $prefixLength = size($scriptPathPrefix);
     string $thisMelFilePath = `substring $whatIsResult ($prefixLength + 1) 999`;
@@ -18,7 +18,7 @@ global proc textureRiggerToolInstall() {
 
     // Check if the python script exists
     if (!`filetest -f $pythonInstallScriptPath`) {
-        warning ("2D Texture Rigger Installer: Cannot find install.py at: " + $pythonInstallScriptPath + "\\nPlease ensure install.py is in the same directory as install.mel.");
+        warning ("Texelator Installer: Cannot find install.py at: " + $pythonInstallScriptPath + "\\nPlease ensure install.py is in the same directory as install.mel.");
         return;
     }
     
@@ -31,24 +31,24 @@ global proc textureRiggerToolInstall() {
     $pythonCommand += "import os\n";
     $pythonCommand += "import maya.cmds as cmds\n";
     $pythonCommand += "script_path = " + $pythonInstallScriptPathEscaped + "\n";
-    $pythonCommand += "print(f'[2D Texture Rigger Installer MEL] Attempting to execute {script_path}')\n";
+    $pythonCommand += "print(f'[Texelator Installer MEL] Attempting to execute {script_path}')\n";
     $pythonCommand += "try:\n";
     $pythonCommand += "    # Add the directory to sys.path\n";
     $pythonCommand += "    script_dir = os.path.dirname(script_path)\n";
     $pythonCommand += "    if script_dir not in sys.path:\n";
     $pythonCommand += "        sys.path.append(script_dir)\n";
-    $pythonCommand += "        print(f'[2D Texture Rigger Installer MEL] Added {script_dir} to sys.path')\n";
+    $pythonCommand += "        print(f'[Texelator Installer MEL] Added {script_dir} to sys.path')\n";
     $pythonCommand += "    \n";    
-    $pythonCommand += "    TEXTURERIGGER_SCRIPT_PATH = script_path\n";
+    $pythonCommand += "    TEXELATOR_SCRIPT_PATH = script_path\n";
     $pythonCommand += "    \n";
     $pythonCommand += "    # Execute the Python script. \n";
     $pythonCommand += "    # The script itself (install.py) is expected to handle shelf button creation \n";
-    $pythonCommand += "    # via its 'if __name__ == \"__main__\":' block, using TEXTURERIGGER_SCRIPT_PATH.\n";
+    $pythonCommand += "    # via its 'if __name__ == \"__main__\":' block, using TEXELATOR_SCRIPT_PATH.\n";
     $pythonCommand += "    code_to_exec = open(script_path).read()\n";
     $pythonCommand += "    exec(code_to_exec)\n";
-    $pythonCommand += "    print(f'[2D Texture Rigger Installer MEL] Python script execution finished: {script_path}')\n";
+    $pythonCommand += "    print(f'[Texelator Installer MEL] Python script execution finished: {script_path}')\n";
     $pythonCommand += "except Exception as e:\n";
-    $pythonCommand += "    print(f'[2D Texture Rigger Installer MEL] Error during Python script execution: {e}')\n";
+    $pythonCommand += "    print(f'[Texelator Installer MEL] Error during Python script execution: {e}')\n";
     $pythonCommand += "    import traceback\n";
     $pythonCommand += "    traceback.print_exc()\n";
     
@@ -56,4 +56,4 @@ global proc textureRiggerToolInstall() {
 }
 
 // Call the installation procedure
-textureRiggerToolInstall();
+texelatorInstall();
