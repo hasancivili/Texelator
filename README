@@ -6,6 +6,19 @@ The tool supports mirrored parts, Projection and UV workflows, image sequences, 
 
 Current UI version: **Texelator v0.1.4**
 
+## Maya compatibility
+
+Texelator Core supports **Autodesk Maya 2022 through Maya 2026**.
+
+- Maya 2022 must run in **Python 3 mode**. Maya 2022 on Windows and Linux can
+  also be started in Python 2 mode, which is not supported by Texelator.
+- Maya 2023 and later use Python 3.
+- Maya 2022–2025 use the legacy `addDoubleLinear` and `multDoubleLinear` math
+  nodes. Maya 2026 uses the renamed `addDL` and `multDL` nodes automatically.
+
+This compatibility range is derived from the current source code and its Maya
+version compatibility helper. Newer Maya versions have not yet been verified.
+
 ## Installation
 
 1. Drag `install.mel` into the Maya viewport.
